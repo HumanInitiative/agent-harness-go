@@ -1,0 +1,32 @@
+# Weekly dependency update PRs. Commit messages are configured to follow
+# Conventional Commits ("chore(deps): bump ..."), so they pass the same
+# checks as human commits; Dependabot's branch names are allowed by
+# scripts/check-branch-name.sh.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      go-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope

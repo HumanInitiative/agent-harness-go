@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Fast checks before anything leaves your machine: no direct pushes to main,
+# a valid branch name, and a clean `make lint`. Tests run in CI.
+# Installed by `make hooks`.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+branch="$(git symbolic-ref --quiet --short HEAD || true)"
+
+if [[ "$branch" == "main" ]]; then
+  echo "✗ Don't push to main directly. Create a branch and open a pull request (see CONTRIBUTING.md)." >&2
+  exit 1
+fi
+
+if [[ -n "$branch" ]]; then
+  "$root/scripts/check-branch-name.sh" "$branch"
+fi
+
+make -C "$root" --no-print-directory lint

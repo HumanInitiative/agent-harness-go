@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Rejects commit messages that don't follow Conventional Commits.
+# Installed by `make hooks`. CI enforces the same rule, so bypassing this
+# hook with --no-verify only delays the failure.
+exec "$(git rev-parse --show-toplevel)/scripts/check-commit-msg.sh" "$1"

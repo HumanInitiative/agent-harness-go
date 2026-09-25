@@ -1,0 +1,200 @@
+basePath: /
+definitions:
+  httpapi.ChatRequest:
+    properties:
+      conversation_id:
+        description: |-
+          ConversationID continues an existing conversation. Omit it to start a
+          new one; the response carries the generated ID back. 1-128 characters
+          of letters, digits, '-' or '_'.
+        example: 3f9c9b1e-2f0a-4a3e-9b1a-6e4b6f0c1a2b
+        type: string
+      message:
+        description: |-
+          Message is the user's message to the assistant. Required; limited to
+          MAX_MESSAGE_CHARS characters.
+        example: What is 12 times 7?
+        type: string
+    type: object
+  httpapi.ChatResponse:
+    properties:
+      conversation_id:
+        description: |-
+          ConversationID identifies the conversation; send it back on the next
+          request to continue.
+        example: 3f9c9b1e-2f0a-4a3e-9b1a-6e4b6f0c1a2b
+        type: string
+      reply:
+        description: Reply is the assistant's final answer.
+        example: 12 times 7 is 84.
+        type: string
+      tool_calls:
+        description: |-
+          ToolCalls lists every tool the agent invoked, in order. Empty when it
+          answered directly.
+        items:
+          $ref: '#/definitions/httpapi.ToolCallDTO'
+        type: array
+    type: object
+  httpapi.ErrorResponse:
+    properties:
+      code:
+        description: |-
+          Code is a stable, machine-readable error identifier. Clients should
+          branch on Code, never on Error.
+        enum:
+        - invalid_request
+        - unauthorized
+        - not_found
+        - method_not_allowed
+        - conversation_busy
+        - request_too_large
+        - rate_limited
+        - tool_turn_limit
+        - internal_error
+        - model_unavailable
+        - timeout
+        - client_closed_request
+        example: invalid_request
+        type: string
+      error:
+        description: Error is a human-readable explanation. Its wording may change.
+        example: 'invalid input: message must not be empty'
+        type: string
+      request_id:
+        description: |-
+          RequestID identifies the request in the server logs; include it when
+          reporting a problem.
+        example: 5b1f6c9e-7a0d-4c7e-8f5e-2d9a1c3b4e6f
+        type: string
+    type: object
+  httpapi.StatusResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+    type: object
+  httpapi.ToolCallDTO:
+    properties:
+      arguments:
+        description: Arguments is the JSON object the model supplied to the tool.
+        type: object
+      duration_ms:
+        description: DurationMS is how long the tool took to run.
+        example: 12
+        type: integer
+      error:
+        description: |-
+          Error is the tool's failure message when the call failed. A failed
+          tool call does not fail the request: the model is told about the
+          failure and decides how to proceed.
+        type: string
+      name:
+        description: Name is the tool's identifier, e.g. "calculator".
+        example: calculator
+        type: string
+      result:
+        description: Result is the tool's output when the call succeeded.
+        example: "84"
+        type: string
+    type: object
+info:
+  contact:
+    name: Human Initiative Engineering
+  description: AI agent harness with tool calling, built with Go and Genkit.
+  title: Human Initiative Agent Harness API
+  version: "1.0"
+paths:
+  /api/v1/chat:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Sends a user message to the AI agent. The agent may call registered tools before
+        replying; every call is listed in tool_calls. Pass conversation_id to continue a
+        conversation, omit it to start a new one. Turns of one conversation must be sent
+        one at a time.
+      parameters:
+      - description: Chat request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.ChatRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpapi.ChatResponse'
+        "400":
+          description: 'invalid_request: malformed body, empty or oversized message,
+            bad conversation_id'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "401":
+          description: 'unauthorized: missing or invalid X-API-Key'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "409":
+          description: 'conversation_busy: another turn of this conversation is still
+            running'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "413":
+          description: 'request_too_large: body exceeds MAX_REQUEST_BYTES'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "429":
+          description: 'rate_limited: see Retry-After header'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "500":
+          description: internal_error or tool_turn_limit
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "503":
+          description: 'model_unavailable: provider overloaded; see Retry-After header'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "504":
+          description: 'timeout: the reply took longer than REQUEST_TIMEOUT_SECONDS'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Send a message to the agent
+      tags:
+      - agent
+  /healthz:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpapi.StatusResponse'
+      summary: Liveness probe
+      tags:
+      - system
+  /readyz:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpapi.StatusResponse'
+      summary: Readiness probe
+      tags:
+      - system
+securityDefinitions:
+  ApiKeyAuth:
+    description: API key issued by the Human Initiative engineering team.
+    in: header
+    name: X-API-Key
+    type: apiKey
+swagger: "2.0"
