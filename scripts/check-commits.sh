@@ -28,10 +28,19 @@ fi
 msg_file="$(mktemp)"
 trap 'rm -f "$msg_file"' EXIT
 
+# Dependabot always capitalizes its subject ("Bump ..."), and its config has
+# no option to change that. Its commits are exempt from the lowercase rule
+# only; everything else about the message is still checked.
+dependabot_email='49699333+dependabot[bot]@users.noreply.github.com'
+
 status=0
 for sha in $commits; do
   git log -1 --format=%B "$sha" >"$msg_file"
-  if ! STRICT=1 "$here/check-commit-msg.sh" "$msg_file"; then
+  allow_capitalized=0
+  if [[ "$(git log -1 --format=%ae "$sha")" == "$dependabot_email" ]]; then
+    allow_capitalized=1
+  fi
+  if ! STRICT=1 ALLOW_CAPITALIZED="$allow_capitalized" "$here/check-commit-msg.sh" "$msg_file"; then
     echo "  ↳ in commit $(git log -1 --format='%h' "$sha")" >&2
     status=1
   fi

@@ -202,3 +202,6 @@ It configures:
 
 Dependency updates arrive as weekly Dependabot PRs
 (`.github/dependabot.yml`) and go through the same checks as any other PR.
+The one exception: Dependabot always writes "Bump" with a capital letter, so
+its commits are exempt from the lowercase-description rule (and only that
+rule).

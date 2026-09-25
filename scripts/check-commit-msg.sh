@@ -6,6 +6,10 @@
 #
 # Set STRICT=1 (CI does) to also reject fixup!/squash!/amend! commits, which
 # are fine while a branch is in review but must be autosquashed before merge.
+#
+# Set ALLOW_CAPITALIZED=1 to accept a description starting with an uppercase
+# letter. check-commits.sh sets it only for Dependabot, whose subjects are
+# "Bump ..." with no configuration option to change that.
 set -euo pipefail
 
 file="${1:?usage: $0 <commit-message-file>}"
@@ -13,8 +17,12 @@ strict="${STRICT:-0}"
 
 types='feat|fix|refactor|perf|docs|test|chore|ci|build|revert'
 # type(optional-scope)!: description — description must not start with an
-# uppercase letter or end with a period.
-pattern="^(${types})(\([a-z0-9-]+\))?!?: [^A-Z[:space:]].*[^.[:space:]]$"
+# uppercase letter (unless ALLOW_CAPITALIZED=1) or end with a period.
+first_char='[^A-Z[:space:]]'
+if [[ "${ALLOW_CAPITALIZED:-0}" == 1 ]]; then
+  first_char='[^[:space:]]'
+fi
+pattern="^(${types})(\([a-z0-9-]+\))?!?: ${first_char}.*[^.[:space:]]$"
 max_subject=100
 recommended_subject=72
 

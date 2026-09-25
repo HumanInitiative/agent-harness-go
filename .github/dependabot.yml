@@ -1,6 +1,7 @@
-# Weekly dependency update PRs. Commit messages are configured to follow
-# Conventional Commits ("chore(deps): bump ..."), so they pass the same
-# checks as human commits; Dependabot's branch names are allowed by
+# Weekly dependency update PRs. The prefixes below make commit messages
+# follow Conventional Commits ("chore(deps): Bump ..."). Dependabot always
+# capitalizes "Bump", so scripts/check-commits.sh exempts Dependabot-authored
+# commits from the lowercase rule only; its branch names are allowed by
 # scripts/check-branch-name.sh.
 version: 2
 updates:
