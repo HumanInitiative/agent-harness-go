@@ -219,14 +219,25 @@ make docker-build  # production image
 
 ## Deployment
 
+The recommended setup runs the harness and a private SearXNG instance
+together:
+
 ```bash
-docker build -t agent-harness-go .
-docker run --rm -p 8080:8080 --env-file .env agent-harness-go
+cp .env.example .env   # set GEMINI_API_KEY, API_KEYS and SEARXNG_SECRET
+docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 ```
 
-- The image is distroless and runs as a non-root user; timezone data is
-  embedded in the binary.
-- On SIGTERM the server stops accepting connections and waits up to
-  `SHUTDOWN_TIMEOUT_SECONDS` for in-flight requests. In Kubernetes, set
-  `terminationGracePeriodSeconds` higher than that.
-- Point liveness probes at `/healthz` and readiness probes at `/readyz`.
+- **Where to host:** a server outside Indonesian consumer-ISP filtering, for
+  example a cloud VM in Singapore. Those filters intercept some search
+  engines (DuckDuckGo is blocked outright), which would quietly weaken
+  search results. SearXNG has no published port; only the harness reaches it.
+- **Image:** Debian slim with only `poppler-utils` (for reading PDF reports)
+  and CA certificates added, running as an unprivileged user; timezone data
+  is embedded in the binary.
+- **Shutdown:** on SIGTERM the server stops accepting connections and waits
+  up to `SHUTDOWN_TIMEOUT_SECONDS` for in-flight requests. Keep the
+  orchestrator's grace period above that: `stop_grace_period` in compose,
+  `terminationGracePeriodSeconds` in Kubernetes.
+- **Probes:** point liveness at `/healthz` and readiness at `/readyz`.
+
+Without compose: `docker build -t agent-harness-go . && docker run --rm -p 8080:8080 --env-file .env agent-harness-go`.

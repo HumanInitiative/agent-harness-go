@@ -14,12 +14,19 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/harness ./cmd/harness
 
 # --- runtime stage -------------------------------------------------------
-# distroless/static has no shell and no package manager, and the :nonroot
-# tag runs as an unprivileged user. It ships CA certificates (needed to call
-# the Gemini API over TLS); timezone data is embedded in the binary itself.
-FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=build /out/harness /harness
+# Debian slim rather than distroless: reading CSR and sustainability reports
+# needs poppler's pdftotext, which depends on shared libraries distroless
+# does not ship. To keep the attack surface small: only poppler-utils and CA
+# certificates are installed, no shell tools are added, apt metadata is
+# removed, and the process runs as an unprivileged user. pdftotext parses
+# untrusted PDFs, so the harness also runs it with a timeout and an output cap.
+FROM debian:trixie-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 65532 --no-create-home --shell /usr/sbin/nologin harness
+COPY --from=build /out/harness /usr/local/bin/harness
 
 EXPOSE 8080
-USER nonroot:nonroot
-ENTRYPOINT ["/harness"]
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/harness"]

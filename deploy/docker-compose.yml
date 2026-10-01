@@ -1,0 +1,43 @@
+# Runs the harness together with its private SearXNG instance.
+#
+#   cp .env.example .env    # fill in GEMINI_API_KEY, API_KEYS, SEARXNG_SECRET
+#   docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+#
+# Host this on a server outside Indonesian consumer-ISP filtering (e.g. a
+# cloud VM in Singapore): those filters intercept some search engines
+# (DuckDuckGo is blocked outright), which would silently weaken search.
+# SearXNG is reachable only from the harness, never from the internet.
+name: agent-harness
+
+services:
+  harness:
+    build:
+      context: ..
+    env_file: ../.env
+    environment:
+      WEB_TOOLS_ENABLED: "true"
+      SEARXNG_URL: http://searxng:8080
+      WEB_SEARCH_PROVIDERS: searxng,duckduckgo
+    ports:
+      - "8080:8080"
+    depends_on:
+      searxng:
+        condition: service_healthy
+    restart: unless-stopped
+    # Must exceed SHUTDOWN_TIMEOUT_SECONDS so in-flight requests can drain.
+    stop_grace_period: 80s
+
+  searxng:
+    # Pinned for reproducible behaviour; Dependabot proposes updates.
+    image: searxng/searxng:2026.9.30-a9d990033
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env (openssl rand -hex 32)}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    # No `ports:` on purpose: the instance must not be public.
