@@ -58,10 +58,19 @@ swagger:
 	$(SWAG) init --generalInfo cmd/harness/main.go --output $(SWAGGER_DIR) --outputTypes go,json,yaml --parseInternal
 	$(SWAG) fmt --dir cmd,internal/adapters/inbound/httpapi
 
-## swagger-check: fail if the generated spec or annotation formatting is stale
-swagger-check: swagger
-	@git diff --exit-code -- $(SWAGGER_DIR) cmd internal/adapters/inbound/httpapi \
-		|| (echo "Swagger output is stale: run 'make swagger' and commit the result"; exit 1)
+SWAGGER_INPUTS = $(SWAGGER_DIR)/* cmd/harness/*.go internal/adapters/inbound/httpapi/*.go
+
+## swagger-check: fail if running `make swagger` would change any file
+# Compares file hashes before and after regenerating, rather than diffing
+# against git, so it also works with uncommitted changes in progress.
+swagger-check:
+	@before=$$(cat $(SWAGGER_INPUTS) | shasum); \
+	$(MAKE) --no-print-directory swagger >/dev/null 2>&1 || { echo "make swagger failed"; exit 1; }; \
+	after=$$(cat $(SWAGGER_INPUTS) | shasum); \
+	if [ "$$before" != "$$after" ]; then \
+		echo "Swagger output was stale and has been regenerated: review and commit api/swagger/ and the annotations"; exit 1; \
+	fi; \
+	echo "swagger output is up to date"
 
 ## tidy: sync go.mod/go.sum with imports
 tidy:

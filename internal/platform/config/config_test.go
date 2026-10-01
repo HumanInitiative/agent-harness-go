@@ -129,3 +129,60 @@ func merge(base map[string]string, key, value string) map[string]string {
 	out[key] = value
 	return out
 }
+
+func TestLoadFrom_WebToolsDisabledByDefaultAndNotValidated(t *testing.T) {
+	vars := requiredOnly()
+	vars["WEB_SEARCH_PROVIDERS"] = "bogus" // ignored while the feature is off
+	cfg, err := config.LoadFrom(env(vars))
+	if err != nil {
+		t.Fatalf("disabled web tools must not be validated: %v", err)
+	}
+	if cfg.Web.Enabled {
+		t.Fatal("web tools must default to disabled")
+	}
+}
+
+func TestLoadFrom_WebToolsDefaults(t *testing.T) {
+	vars := merge(requiredOnly(), "WEB_TOOLS_ENABLED", "true")
+	cfg, err := config.LoadFrom(env(vars))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	w := cfg.Web
+	if strings.Join(w.Providers, ",") != "duckduckgo" || !w.RespectRobotsOnFetch || w.DomainRatePerSecond != 1 ||
+		w.FetchTimeout != 15*time.Second || w.SearchLanguage != "id" || !strings.Contains(w.UserAgent, "https://") {
+		t.Fatalf("unexpected defaults: %+v", w)
+	}
+
+	withSearx := merge(vars, "SEARXNG_URL", "http://searxng:8080")
+	cfg, err = config.LoadFrom(env(withSearx))
+	if err != nil || strings.Join(cfg.Web.Providers, ",") != "searxng,duckduckgo" {
+		t.Fatalf("with SEARXNG_URL, searxng should come first: %v, %v", cfg.Web.Providers, err)
+	}
+}
+
+func TestLoadFrom_RejectsInvalidWebConfig(t *testing.T) {
+	on := merge(requiredOnly(), "WEB_TOOLS_ENABLED", "true")
+	cases := map[string]map[string]string{
+		"unknown provider":           merge(on, "WEB_SEARCH_PROVIDERS", "google"),
+		"duplicate provider":         merge(on, "WEB_SEARCH_PROVIDERS", "duckduckgo,duckduckgo"),
+		"searxng without url":        merge(on, "WEB_SEARCH_PROVIDERS", "searxng"),
+		"user agent without contact": merge(on, "WEB_USER_AGENT", "MyBot/1.0"),
+		"fetch timeout too long":     merge(on, "WEB_FETCH_TIMEOUT_SECONDS", "60"),
+		"bad rate":                   merge(on, "WEB_DOMAIN_REQUESTS_PER_SECOND", "-1"),
+	}
+	for name, vars := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := config.LoadFrom(env(vars)); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}
+
+func TestLoadFrom_FractionalDomainRate(t *testing.T) {
+	cfg, err := config.LoadFrom(env(merge(merge(requiredOnly(), "WEB_TOOLS_ENABLED", "true"), "WEB_DOMAIN_REQUESTS_PER_SECOND", "0.5")))
+	if err != nil || cfg.Web.DomainRatePerSecond != 0.5 {
+		t.Fatalf("got %v, %v", cfg.Web.DomainRatePerSecond, err)
+	}
+}

@@ -11,8 +11,8 @@ touching business logic. See [Architecture](#architecture).
 ## Scope
 
 - ✅ One authenticated endpoint that runs a tool-calling conversation turn.
-- ✅ Two example tools (`get_current_time`, `calculator`) showing the pattern
-  for adding real ones.
+- ✅ Built-in tools: `get_current_time`, `calculator`, and (behind
+  `WEB_TOOLS_ENABLED`) `web_search` + `web_fetch` for reading the web safely.
 - ✅ API-key auth, per-key rate limiting, request size limits, timeouts,
   graceful shutdown, structured and correlated logs, Swagger docs.
 - ❌ No per-user authorization: every valid API key can use every tool.
@@ -118,7 +118,12 @@ internal/
                                       package that imports Genkit
     outbound/memory/                 ConversationStore in bounded memory
                                       (LRU cap, per-conversation cap, TTL)
-    outbound/tools/                  ToolHandlers: get_current_time, calculator
+    outbound/tools/                  ToolHandlers: get_current_time, calculator,
+                                      web_search, web_fetch
+
+  websearch/                       standalone library behind web_search/web_fetch:
+                                    search providers, SSRF-guarded fetching,
+                                    robots.txt, extraction (see its README.md)
 
   platform/
     config/                          the only code that reads the environment;
@@ -159,6 +164,18 @@ Redis/Postgres) before running more than one replica:
 - the per-conversation "turn in progress" guard (`application/agent/keyset.go`),
 - the rate limiter (`adapters/inbound/httpapi/ratelimit.go`); with N replicas
   the effective limit is N times the configured one.
+
+## Web tools
+
+`web_search` and `web_fetch` let the agent search the web and read pages or
+PDFs. They are off by default; enable them with `WEB_TOOLS_ENABLED=true`.
+Fetched content is always wrapped as `<web_content untrusted="true">`, and
+the system prompt tells the model to treat it as data, never as instructions.
+
+On Indonesian networks DuckDuckGo is blocked by ISPs, so run a SearXNG
+instance (config in `deploy/searxng/`) and set `SEARXNG_URL`. Setup, safety
+properties and measured limits are in
+[internal/websearch/README.md](internal/websearch/README.md).
 
 ## Configuration
 

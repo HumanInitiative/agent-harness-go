@@ -1,0 +1,17 @@
+# Minimal SearXNG settings for agent-harness-go (WEB_SEARCH_PROVIDERS=searxng).
+# Everything not set here falls back to SearXNG's defaults.
+# The secret key is NOT stored here: pass it as the SEARXNG_SECRET env var.
+use_default_settings: true
+
+server:
+  # The instance is only for the harness on a private network; its own
+  # bot limiter would throttle the harness itself.
+  limiter: false
+  public_instance: false
+
+search:
+  # The harness reads results through the JSON API, which is disabled by
+  # default (requests then fail with 403).
+  formats: [html, json]
+  default_lang: "id"
+  safe_search: 1

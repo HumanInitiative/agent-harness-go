@@ -39,6 +39,7 @@ import (
 	"github.com/HumanInitiative/agent-harness-go/internal/platform/config"
 	"github.com/HumanInitiative/agent-harness-go/internal/platform/logger"
 	"github.com/HumanInitiative/agent-harness-go/internal/ports/outbound"
+	"github.com/HumanInitiative/agent-harness-go/internal/websearch"
 )
 
 func main() {
@@ -83,6 +84,13 @@ func run() error {
 	registeredTools := []outbound.ToolHandler{
 		tools.NewCurrentTimeTool(),
 		tools.NewCalculatorTool(),
+	}
+	if cfg.Web.Enabled {
+		webTools, err := buildWebTools(cfg.Web, log)
+		if err != nil {
+			return fmt.Errorf("initialize web tools: %w", err)
+		}
+		registeredTools = append(registeredTools, webTools...)
 	}
 
 	service, err := agent.NewService(model, conversations, registeredTools, agent.Config{
@@ -156,4 +164,72 @@ func run() error {
 		log.Info("shutdown complete")
 		return nil
 	}
+}
+
+// buildWebTools wires the websearch library into the web_search and
+// web_fetch tools.
+func buildWebTools(cfg config.WebConfig, log *slog.Logger) ([]outbound.ToolHandler, error) {
+	metrics := websearch.NewMetrics()
+
+	// PDF reading is optional: without pdftotext the fetcher reports PDFs as
+	// unreadable instead of the harness refusing to start.
+	var pdf websearch.PDFExtractor
+	if p, err := websearch.NewPDFToText(30*time.Second, 2<<20); err != nil {
+		log.Warn("PDF reading disabled", "reason", err)
+	} else {
+		pdf = p
+	}
+
+	fetcher, err := websearch.NewFetcher(websearch.FetcherOptions{
+		UserAgent:           cfg.UserAgent,
+		Timeout:             cfg.FetchTimeout,
+		MaxBodyBytes:        cfg.MaxBodyBytes,
+		RespectRobots:       cfg.RespectRobotsOnFetch,
+		Guard:               websearch.Guard{},
+		DomainRatePerSecond: cfg.DomainRatePerSecond,
+		CacheTTL:            cfg.CacheTTL,
+		PDF:                 pdf,
+		Metrics:             metrics,
+	}, log)
+	if err != nil {
+		return nil, err
+	}
+
+	// Search providers talk to fixed, operator-chosen endpoints, so they use
+	// a plain client; the SSRF-guarded client is for model-chosen URLs.
+	searchClient := &http.Client{Timeout: cfg.FetchTimeout}
+	providers := make([]websearch.Provider, 0, len(cfg.Providers))
+	for _, name := range cfg.Providers {
+		switch name {
+		case "searxng":
+			p, err := websearch.NewSearXNG(cfg.SearXNGURL, searchClient, cfg.UserAgent, cfg.SearchLanguage)
+			if err != nil {
+				return nil, err
+			}
+			providers = append(providers, p)
+		case "duckduckgo":
+			// DuckDuckGo's region code for Indonesia in Indonesian is "id-id";
+			// other languages get no regional bias.
+			region := ""
+			if cfg.SearchLanguage == "id" {
+				region = "id-id"
+			}
+			providers = append(providers, websearch.NewDuckDuckGo(websearch.DuckDuckGoHTMLURL, searchClient, cfg.UserAgent, region))
+		}
+	}
+	router, err := websearch.NewRouter(providers, websearch.RouterOptions{
+		ProviderTimeout: cfg.FetchTimeout,
+		CacheTTL:        cfg.CacheTTL,
+		Metrics:         metrics,
+	}, log)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Info("web tools enabled", "providers", cfg.Providers, "respect_robots_on_fetch", cfg.RespectRobotsOnFetch,
+		"pdf", pdf != nil)
+	return []outbound.ToolHandler{
+		tools.NewWebSearchTool(router, nil),
+		tools.NewWebFetchTool(fetcher),
+	}, nil
 }
