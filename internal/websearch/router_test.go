@@ -186,6 +186,35 @@ func TestRouter_CachesResults(t *testing.T) {
 	}
 }
 
+func TestRouter_PacesUpstreamQueriesButNotCacheHits(t *testing.T) {
+	a := &scriptedProvider{name: "a", replies: []func(context.Context) ([]Result, error){ok("https://a.example")}}
+	r, _ := NewRouter([]Provider{a}, RouterOptions{MinInterval: 50 * time.Millisecond, CacheTTL: time.Hour},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	start := time.Now()
+	for _, q := range []string{"q1", "q2", "q3", "q1", "q2"} { // last two are cache hits
+		if _, err := r.Search(context.Background(), q, 5); err != nil {
+			t.Fatal(err)
+		}
+	}
+	elapsed := time.Since(start)
+	if a.callCount() != 3 {
+		t.Fatalf("expected 3 upstream queries, got %d", a.callCount())
+	}
+	// 3 upstream queries need at least 2 gaps of 50ms; cache hits add none.
+	if elapsed < 100*time.Millisecond || elapsed > 400*time.Millisecond {
+		t.Fatalf("pacing off: %v for 3 upstream queries at 50ms spacing", elapsed)
+	}
+
+	// Pacing gives up when the caller does.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, _ = r.Search(context.Background(), "q4", 5) // consume the token
+	if _, err := r.Search(ctx, "q5", 5); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected the caller's deadline while waiting for pacing, got %v", err)
+	}
+}
+
 func TestRouter_StopsWhenCallerCancels(t *testing.T) {
 	clock := &fakeClock{t: time.Unix(0, 0)}
 	a := &scriptedProvider{name: "a", replies: []func(context.Context) ([]Result, error){ok("https://a.example")}}

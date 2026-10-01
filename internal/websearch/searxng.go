@@ -44,6 +44,9 @@ type searxngResponse struct {
 		URL     string `json:"url"`
 		Content string `json:"content"`
 	} `json:"results"`
+	// UnresponsiveEngines lists [engine, reason] pairs for engines that
+	// failed this query (rate limited, CAPTCHA, timeout, ...).
+	UnresponsiveEngines [][]string `json:"unresponsive_engines"`
 }
 
 // Search implements Provider.
@@ -86,6 +89,18 @@ func (s *SearXNG) Search(ctx context.Context, query string, limit int) ([]Result
 			return nil, fmt.Errorf("%w: searxng did not return JSON (is format=json enabled?): %v", ErrProviderMisconfigured, err)
 		}
 		return nil, fmt.Errorf("searxng: decode response: %w", err)
+	}
+
+	// No results while engines failed is not "nothing found": the upstream
+	// engines are rate limiting or blocking the instance. Reporting it as an
+	// error lets the router's circuit breaker and the logs show it, instead
+	// of every later search quietly returning nothing.
+	if len(body.Results) == 0 && len(body.UnresponsiveEngines) > 0 {
+		var failed []string
+		for _, e := range body.UnresponsiveEngines {
+			failed = append(failed, strings.Join(e, ": "))
+		}
+		return nil, fmt.Errorf("%w: searxng returned no results and its engines failed (%s)", ErrBlocked, strings.Join(failed, "; "))
 	}
 
 	results := make([]Result, 0, len(body.Results))

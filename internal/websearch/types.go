@@ -40,7 +40,8 @@ type Page struct {
 	URL      string
 	FinalURL string
 	Title    string
-	// Kind is "html", "text" or "pdf".
+	// Kind is "html", "text", "xml" or "pdf". For "xml" (e.g. sitemaps),
+	// Content is the raw document.
 	Kind string
 	// Content is the extracted text (light markdown for HTML). It is not
 	// truncated to any token budget; use Truncate for that.
@@ -75,7 +76,8 @@ var (
 	// ErrTooLarge means a response exceeded the size limit and could not be
 	// used partially (e.g. a truncated PDF).
 	ErrTooLarge = errors.New("websearch: response too large")
-	// ErrUnsupportedContent means the content type is not html, text or pdf.
+	// ErrUnsupportedContent means the content type is not html, text, xml
+	// or pdf.
 	ErrUnsupportedContent = errors.New("websearch: unsupported content type")
 	// ErrNotAllowedByRobots means robots.txt disallows the URL.
 	ErrNotAllowedByRobots = errors.New("websearch: disallowed by robots.txt")

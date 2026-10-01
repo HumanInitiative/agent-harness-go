@@ -7,6 +7,14 @@
 # cloud VM in Singapore): those filters intercept some search engines
 # (DuckDuckGo is blocked outright), which would silently weaken search.
 # SearXNG is reachable only from the harness, never from the internet.
+#
+# The CSR index is filled by csrctl, run on a schedule (e.g. weekly from the
+# host's cron), never by a timer inside the harness:
+#
+#   docker compose -f deploy/docker-compose.yml --env-file .env run --rm \
+#     --entrypoint csrctl harness import /app/seed/companies.csv
+#   docker compose -f deploy/docker-compose.yml --env-file .env run --rm \
+#     --entrypoint csrctl harness crawl
 name: agent-harness
 
 services:
@@ -18,6 +26,10 @@ services:
       WEB_TOOLS_ENABLED: "true"
       SEARXNG_URL: http://searxng:8080
       WEB_SEARCH_PROVIDERS: searxng,duckduckgo
+      CSR_TOOLS_ENABLED: "true"
+    volumes:
+      # The CSR index (SQLite), shared with `csrctl` runs.
+      - csr-data:/app/data
     ports:
       - "8080:8080"
     depends_on:
@@ -41,3 +53,6 @@ services:
       retries: 6
     restart: unless-stopped
     # No `ports:` on purpose: the instance must not be public.
+
+volumes:
+  csr-data: {}

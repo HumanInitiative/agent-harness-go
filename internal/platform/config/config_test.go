@@ -186,3 +186,34 @@ func TestLoadFrom_FractionalDomainRate(t *testing.T) {
 		t.Fatalf("got %v, %v", cfg.Web.DomainRatePerSecond, err)
 	}
 }
+
+func TestLoadFrom_CSRToolsOffByDefault(t *testing.T) {
+	cfg, err := config.LoadFrom(env(requiredOnly()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CSR.ToolsEnabled || cfg.CSR.DBPath != "data/csr.db" || cfg.CSR.InstitutionProfilePath != "config/institution-profile.yaml" {
+		t.Fatalf("unexpected CSR defaults: %+v", cfg.CSR)
+	}
+	if _, err := config.LoadFrom(env(merge(merge(requiredOnly(), "CSR_TOOLS_ENABLED", "true"), "CSR_DB_PATH", " "))); err != nil {
+		// A blank value falls back to the default path, which is fine.
+		t.Fatalf("blank path should fall back to the default: %v", err)
+	}
+}
+
+func TestLoadCrawlerFrom_NeedsNoAPIKeysAndForcesWebValidation(t *testing.T) {
+	cfg, err := config.LoadCrawlerFrom(env(map[string]string{}))
+	if err != nil {
+		t.Fatalf("a discovery-only crawler needs no secrets: %v", err)
+	}
+	if !cfg.Web.Enabled || cfg.Workers != 4 || cfg.CompaniesPerRun != 25 || cfg.GeminiAPIKey != "" {
+		t.Fatalf("unexpected crawler defaults: %+v", cfg)
+	}
+	// Web settings are validated even though WEB_TOOLS_ENABLED is unset.
+	if _, err := config.LoadCrawlerFrom(env(map[string]string{"WEB_USER_AGENT": "NoContactBot"})); err == nil {
+		t.Fatal("crawler must reject a User-Agent without contact details")
+	}
+	if _, err := config.LoadCrawlerFrom(env(map[string]string{"CSR_CRAWL_WORKERS": "0"})); err == nil {
+		t.Fatal("zero workers must be rejected")
+	}
+}

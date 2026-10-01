@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // RouterOptions configures a Router. Zero values take the noted defaults.
@@ -26,6 +28,12 @@ type RouterOptions struct {
 	CacheSize int
 	// MaxResults caps the limit callers may ask for. Default 10.
 	MaxResults int
+	// MinInterval spaces out queries sent to providers (cache hits are
+	// free). Search engines rate-limit by IP: a batch crawl sending
+	// hundreds of queries in a few minutes got every upstream engine of a
+	// SearXNG instance suspended. Zero means no pacing, which suits
+	// interactive use.
+	MinInterval time.Duration
 	// Now returns the current time; nil means time.Now.
 	Now     func() time.Time
 	Metrics *Metrics
@@ -40,6 +48,7 @@ type Router struct {
 	opts      RouterOptions
 	cache     *Cache[[]Result]
 	log       *slog.Logger
+	pace      *rate.Limiter // nil when MinInterval is zero
 
 	mu       sync.Mutex
 	breakers map[string]*breaker
@@ -86,6 +95,9 @@ func NewRouter(providers []Provider, opts RouterOptions, log *slog.Logger) (*Rou
 	for _, p := range providers {
 		r.breakers[p.Name()] = &breaker{}
 	}
+	if opts.MinInterval > 0 {
+		r.pace = rate.NewLimiter(rate.Every(opts.MinInterval), 1)
+	}
 	return r, nil
 }
 
@@ -118,6 +130,11 @@ func (r *Router) Search(ctx context.Context, query string, limit int) ([]Result,
 			continue
 		}
 
+		if r.pace != nil {
+			if err := r.pace.Wait(ctx); err != nil {
+				return nil, err
+			}
+		}
 		start := r.opts.Now()
 		attemptCtx, cancel := context.WithTimeout(ctx, r.opts.ProviderTimeout)
 		results, err := p.Search(attemptCtx, query, limit)

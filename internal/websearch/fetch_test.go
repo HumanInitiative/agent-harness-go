@@ -251,6 +251,9 @@ func TestFetch_ContentTypes(t *testing.T) {
 		case "/report.pdf":
 			w.Header().Set("Content-Type", "application/pdf")
 			_, _ = io.WriteString(w, "%PDF-1.7 fake")
+		case "/sitemap.xml":
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = io.WriteString(w, `<?xml version="1.0"?><urlset><url><loc>https://x/csr</loc></url></urlset>`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -258,6 +261,9 @@ func TestFetch_ContentTypes(t *testing.T) {
 	defer srv.Close()
 
 	f, _ := testFetcher(t, srv)
+	if page, err := f.Fetch(context.Background(), srv.URL+"/sitemap.xml"); err != nil || page.Kind != "xml" || !strings.Contains(page.Content, "<loc>https://x/csr</loc>") {
+		t.Errorf("sitemap XML: %+v, %v", page, err)
+	}
 	if _, err := f.Fetch(context.Background(), srv.URL+"/image.png"); !errors.Is(err, ErrUnsupportedContent) {
 		t.Errorf("image: expected ErrUnsupportedContent, got %v", err)
 	}
@@ -299,7 +305,7 @@ func TestFetch_StatusErrorCarriesRetryAfter(t *testing.T) {
 func TestFetch_Robots(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/robots.txt" {
-			_, _ = io.WriteString(w, "User-agent: *\nDisallow: /private\n")
+			_, _ = io.WriteString(w, "User-agent: *\nDisallow: /private\nSitemap: https://example.org/sitemap.xml\n")
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain")
@@ -313,6 +319,9 @@ func TestFetch_Robots(t *testing.T) {
 	}
 	if _, err := strict.Fetch(context.Background(), srv.URL+"/public"); err != nil {
 		t.Fatalf("allowed path failed: %v", err)
+	}
+	if maps, err := strict.Sitemaps(context.Background(), srv.URL+"/anything"); err != nil || len(maps) != 1 || maps[0] != "https://example.org/sitemap.xml" {
+		t.Fatalf("Sitemaps: %v %v", maps, err)
 	}
 
 	lenient, logs := testFetcher(t, srv, func(o *FetcherOptions) { o.RespectRobots = false })

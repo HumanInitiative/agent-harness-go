@@ -1,0 +1,13 @@
+# The institution the CSR index scores companies against (CSR_INSTITUTION_PROFILE).
+# These values come from the example in the original design; ADJUST THEM to
+# Human Initiative's actual programs and regions before relying on the scores.
+#
+# Terms are matched with synonyms: "beasiswa" on a company page counts toward
+# "pendidikan", "UMKM" toward "pemberdayaan ekonomi", "Jabar" toward
+# "Jawa Barat" (see internal/websearch/csr/score.go).
+institution_profile:
+  focus_areas: [pendidikan, pemberdayaan ekonomi, kesehatan]
+  regions: [Jawa Barat, DKI Jakarta, Banten]
+  program_types: [pelatihan, beasiswa, bantuan sosial]
+  # Profiles extracted with lower model confidence are listed last and flagged.
+  min_confidence: 0.6

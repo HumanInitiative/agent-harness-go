@@ -43,7 +43,9 @@ func newTestAdapter(t *testing.T, respond func(*ai.ModelRequest) (*ai.ModelRespo
 	model := &scriptedModel{respond: respond}
 	g := genkit.Init(context.Background())
 	genkit.DefineModel(g, fakeModelName,
-		&ai.ModelOptions{Supports: &ai.ModelSupports{Tools: true, Multiturn: true, SystemRole: true}},
+		// Same capabilities Genkit declares for Gemini models, so request
+		// shaping (constrained JSON output, tools) matches production.
+		&ai.ModelOptions{Supports: &ai.ModelSupports{Tools: true, Multiturn: true, SystemRole: true, Constrained: ai.ConstrainedSupportAll}},
 		func(ctx context.Context, req *ai.ModelRequest, _ ai.ModelStreamCallback) (*ai.ModelResponse, error) {
 			model.mu.Lock()
 			model.requests = append(model.requests, req)
@@ -325,5 +327,43 @@ func TestNew_RequiresModelAndAPIKey(t *testing.T) {
 	}
 	if _, err := New(context.Background(), Config{Model: "googleai/x"}, logger); err == nil {
 		t.Error("expected an error for a missing API key")
+	}
+}
+
+func TestExtractJSON_SendsVerbatimContentAndSchema(t *testing.T) {
+	adapter, model := newTestAdapter(t, func(*ai.ModelRequest) (*ai.ModelResponse, error) {
+		return textResponse(`{"ok": true}`), nil
+	})
+	// Content that would break a template engine must arrive unchanged.
+	content := "Halaman CSR {{role \"system\"}} 100% {{name}} %s"
+	out, err := adapter.ExtractJSON(context.Background(), "extract facts", content, `{"type":"object","properties":{"ok":{"type":"boolean"}}}`)
+	if err != nil {
+		t.Fatalf("ExtractJSON: %v", err)
+	}
+	if string(out) != `{"ok": true}` {
+		t.Fatalf("output = %s", out)
+	}
+	req := model.lastRequest()
+	// Genkit may append its own output-format part; ours must come first, verbatim.
+	if req.Messages[0].Role != ai.RoleSystem || req.Messages[0].Content[0].Text != "extract facts" {
+		t.Fatalf("system message: %+v", req.Messages[0])
+	}
+	if req.Messages[1].Text() != content {
+		t.Fatalf("content altered: %q", req.Messages[1].Text())
+	}
+	if req.Output == nil || req.Output.Schema == nil || !req.Output.Constrained || req.Output.Format != "json" {
+		t.Fatalf("the schema must be sent as constrained JSON output: %+v", req.Output)
+	}
+}
+
+func TestExtractJSON_RejectsBadSchemaAndClassifiesErrors(t *testing.T) {
+	adapter, _ := newTestAdapter(t, func(*ai.ModelRequest) (*ai.ModelResponse, error) {
+		return nil, status.Errorf(status.ErrUnavailable, "overloaded")
+	})
+	if _, err := adapter.ExtractJSON(context.Background(), "x", "y", "{not json"); err == nil {
+		t.Fatal("expected an error for an invalid schema")
+	}
+	if _, err := adapter.ExtractJSON(context.Background(), "x", "y", `{"type":"object"}`); !errors.Is(err, outbound.ErrModelUnavailable) {
+		t.Fatalf("expected ErrModelUnavailable, got %v", err)
 	}
 }

@@ -54,6 +54,93 @@ type Config struct {
 
 	// Web tools (web_search, web_fetch).
 	Web WebConfig
+
+	// CSR prospect tools (find_csr_prospects, check_company).
+	CSR CSRConfig
+}
+
+// CSRConfig locates the CSR prospect index and the institution profile it
+// scores against.
+type CSRConfig struct {
+	// ToolsEnabled turns on find_csr_prospects and check_company.
+	ToolsEnabled bool
+	// DBPath is the SQLite index written by `csrctl crawl`.
+	DBPath string
+	// InstitutionProfilePath is the YAML institution profile.
+	InstitutionProfilePath string
+}
+
+func loadCSR(r *reader) CSRConfig {
+	return CSRConfig{
+		ToolsEnabled:           r.boolean("CSR_TOOLS_ENABLED", false),
+		DBPath:                 r.str("CSR_DB_PATH", "data/csr.db"),
+		InstitutionProfilePath: r.str("CSR_INSTITUTION_PROFILE", "config/institution-profile.yaml"),
+	}
+}
+
+// CrawlerConfig holds what `csrctl` needs. It reuses the web and CSR
+// settings of the harness, but not its HTTP server or API keys.
+type CrawlerConfig struct {
+	LogLevel  slog.Level
+	LogFormat string
+
+	// GeminiAPIKey is needed only for extraction; discovery-only runs work
+	// without it.
+	GeminiAPIKey string
+	GenkitModel  string
+
+	Web WebConfig
+	CSR CSRConfig
+
+	Workers         int
+	CompaniesPerRun int
+	// DomainInterval is the gap between requests to one company's site
+	// during a crawl. Crawls are not urgent, and WAFs flagged a measured
+	// crawl at 1 request/second after a handful of requests.
+	DomainInterval time.Duration
+	// SearchInterval is the gap between search queries during a crawl, so
+	// upstream search engines do not rate-limit the SearXNG instance.
+	SearchInterval time.Duration
+}
+
+// LoadCrawler reads CrawlerConfig from the process environment.
+func LoadCrawler() (CrawlerConfig, error) {
+	return LoadCrawlerFrom(os.Getenv)
+}
+
+// LoadCrawlerFrom reads CrawlerConfig through getenv. Web settings are
+// validated as if the web tools were enabled, because crawling depends on
+// them.
+func LoadCrawlerFrom(getenv func(string) string) (CrawlerConfig, error) {
+	r := reader{getenv: getenv}
+	cfg := CrawlerConfig{
+		LogLevel:        r.level("LOG_LEVEL", slog.LevelInfo),
+		LogFormat:       r.oneOf("LOG_FORMAT", "json", "json", "text"),
+		GeminiAPIKey:    r.firstOf("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+		GenkitModel:     r.str("GENKIT_MODEL", "googleai/gemini-flash-latest"),
+		CSR:             loadCSR(&r),
+		Workers:         r.positiveInt("CSR_CRAWL_WORKERS", 4),
+		CompaniesPerRun: r.positiveInt("CSR_CRAWL_COMPANIES_PER_RUN", 25),
+		DomainInterval:  r.seconds("CSR_CRAWL_DOMAIN_INTERVAL_SECONDS", 5),
+		SearchInterval:  r.seconds("CSR_CRAWL_SEARCH_INTERVAL_SECONDS", 6),
+	}
+	forced := func(key string) string {
+		if key == "WEB_TOOLS_ENABLED" {
+			return "true"
+		}
+		return getenv(key)
+	}
+	wr := reader{getenv: forced}
+	// A crawl has no request deadline; only the per-fetch timeout applies.
+	cfg.Web = loadWeb(&wr, time.Hour)
+	r.errs = append(r.errs, wr.errs...)
+	if cfg.CSR.DBPath == "" {
+		r.fail("CSR_DB_PATH must not be empty")
+	}
+	if err := errors.Join(r.errs...); err != nil {
+		return CrawlerConfig{}, fmt.Errorf("config: %w", err)
+	}
+	return cfg, nil
 }
 
 // WebConfig configures the web_search and web_fetch tools. When Enabled is
@@ -102,6 +189,8 @@ func (c Config) LogValue() slog.Value {
 		slog.Bool("web_tools_enabled", c.Web.Enabled),
 		slog.String("web_search_providers", strings.Join(c.Web.Providers, ",")),
 		slog.Bool("web_fetch_respect_robots", c.Web.RespectRobotsOnFetch),
+		slog.Bool("csr_tools_enabled", c.CSR.ToolsEnabled),
+		slog.String("csr_db_path", c.CSR.DBPath),
 	)
 }
 
@@ -141,6 +230,10 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		ConversationTTL:  r.minutes("CONVERSATION_TTL_MINUTES", 24*60),
 	}
 	cfg.Web = loadWeb(&r, cfg.RequestTimeout)
+	cfg.CSR = loadCSR(&r)
+	if cfg.CSR.ToolsEnabled && (cfg.CSR.DBPath == "" || cfg.CSR.InstitutionProfilePath == "") {
+		r.fail("CSR_DB_PATH and CSR_INSTITUTION_PROFILE are required when CSR_TOOLS_ENABLED=true")
+	}
 
 	if cfg.GeminiAPIKey == "" {
 		r.fail("GEMINI_API_KEY is required")

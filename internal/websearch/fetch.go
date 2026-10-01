@@ -225,7 +225,7 @@ func (f *Fetcher) fetch(ctx context.Context, u *url.URL) (Page, error) {
 		if err != nil {
 			return Page{}, fmt.Errorf("websearch: parse %s: %w", u, err)
 		}
-	case "text":
+	case "text", "xml":
 		r, err := charset.NewReader(bytes.NewReader(body), contentType)
 		if err != nil {
 			return Page{}, fmt.Errorf("websearch: decode %s: %w", u, err)
@@ -261,6 +261,19 @@ func (f *Fetcher) clientWithFreshCookies() *http.Client {
 	c := *f.client
 	c.Jar = jar
 	return &c
+}
+
+// Sitemaps returns the sitemap URLs declared (Sitemap: lines) in the
+// robots.txt of rawURL's host.
+func (f *Fetcher) Sitemaps(ctx context.Context, rawURL string) ([]string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidURL, err)
+	}
+	if err := f.opts.Guard.CheckURL(u); err != nil {
+		return nil, err
+	}
+	return f.robots.Sitemaps(ctx, u)
 }
 
 // fetchRobots retrieves a robots.txt with the same guarded client.
@@ -330,7 +343,7 @@ func readLimited(r io.Reader, max int64) ([]byte, bool, error) {
 }
 
 // classify maps a Content-Type (or, when missing or generic, the sniffed
-// body) to "html", "text" or "pdf".
+// body) to "html", "text", "xml" (sitemaps) or "pdf".
 func classify(contentType string, body []byte) (string, error) {
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 	if mediaType == "" || mediaType == "application/octet-stream" {
@@ -341,6 +354,8 @@ func classify(contentType string, body []byte) (string, error) {
 		return "html", nil
 	case "text/plain":
 		return "text", nil
+	case "application/xml", "text/xml":
+		return "xml", nil
 	case "application/pdf":
 		return "pdf", nil
 	}

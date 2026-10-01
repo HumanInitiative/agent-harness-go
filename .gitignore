@@ -23,6 +23,9 @@ profile.cov
 # Build output
 bin/
 
+# Local data: the CSR index (SQLite) and its WAL files
+data/
+
 # Go workspace file
 go.work
 go.work.sum

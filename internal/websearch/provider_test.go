@@ -85,6 +85,28 @@ func TestSearXNG_ErrorsAreActionable(t *testing.T) {
 	}
 }
 
+func TestSearXNG_AllEnginesFailingIsBlockedNotEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"results": [], "unresponsive_engines": [["brave", "Suspended: too many requests"], ["google cse", "too many requests"]]}`)
+	}))
+	defer srv.Close()
+	p, _ := NewSearXNG(srv.URL, srv.Client(), "test/1", "")
+	_, err := p.Search(context.Background(), "q", 5)
+	if !errors.Is(err, ErrBlocked) || !strings.Contains(err.Error(), "brave: Suspended: too many requests") {
+		t.Fatalf("expected ErrBlocked naming the failed engines, got %v", err)
+	}
+
+	// Results despite some failed engines are a success.
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"results": [{"title":"t","url":"https://a.example","content":"c"}], "unresponsive_engines": [["brave", "too many requests"]]}`)
+	}))
+	defer ok.Close()
+	p, _ = NewSearXNG(ok.URL, ok.Client(), "test/1", "")
+	if rs, err := p.Search(context.Background(), "q", 5); err != nil || len(rs) != 1 {
+		t.Fatalf("partial engine failure should still return results: %v %v", rs, err)
+	}
+}
+
 func TestNewSearXNG_RejectsBadURL(t *testing.T) {
 	for _, u := range []string{"", "not a url", "ftp://x"} {
 		if _, err := NewSearXNG(u, http.DefaultClient, "x", ""); !errors.Is(err, ErrProviderMisconfigured) {

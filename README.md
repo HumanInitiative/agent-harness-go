@@ -11,13 +11,15 @@ touching business logic. See [Architecture](#architecture).
 ## Scope
 
 - ✅ One authenticated endpoint that runs a tool-calling conversation turn.
-- ✅ Built-in tools: `get_current_time`, `calculator`, and (behind
-  `WEB_TOOLS_ENABLED`) `web_search` + `web_fetch` for reading the web safely.
+- ✅ Built-in tools: `get_current_time`, `calculator`; behind
+  `WEB_TOOLS_ENABLED`, `web_search` + `web_fetch` for reading the web safely;
+  behind `CSR_TOOLS_ENABLED`, `find_csr_prospects` + `check_company` for
+  finding companies whose CSR programs could fund Human Initiative's work.
 - ✅ API-key auth, per-key rate limiting, request size limits, timeouts,
   graceful shutdown, structured and correlated logs, Swagger docs.
 - ❌ No per-user authorization: every valid API key can use every tool.
-- ❌ No durable storage: conversations live in process memory, are bounded,
-  and are lost on restart.
+- ❌ Conversations are not durable: they live in process memory, are
+  bounded, and are lost on restart. (The CSR index is durable: SQLite.)
 - ❌ Single instance only (see [Scaling beyond one instance](#scaling-beyond-one-instance)).
 
 ## Quickstart
@@ -94,8 +96,8 @@ After changing an annotation, run `make swagger` and commit `api/swagger/`
 ## Architecture
 
 ```
-cmd/harness/main.go                composition root: the only place that knows
-                                    every concrete adapter
+cmd/harness/main.go                composition root of the HTTP service
+cmd/csrctl/                        CLI for the CSR index: import, crawl, review
 api/swagger/                       generated OpenAPI spec (make swagger)
 
 internal/
@@ -124,6 +126,11 @@ internal/
   websearch/                       standalone library behind web_search/web_fetch:
                                     search providers, SSRF-guarded fetching,
                                     robots.txt, extraction (see its README.md)
+    csr/                             CSR prospect index: seed import, CSR page
+                                    discovery (routing record), verified LLM
+                                    extraction, scoring (see its README.md)
+
+  bootstrap/                       wiring shared by cmd/harness and cmd/csrctl
 
   platform/
     config/                          the only code that reads the environment;
@@ -176,6 +183,24 @@ On Indonesian networks DuckDuckGo is blocked by ISPs, so run a SearXNG
 instance (config in `deploy/searxng/`) and set `SEARXNG_URL`. Setup, safety
 properties and measured limits are in
 [internal/websearch/README.md](internal/websearch/README.md).
+
+## CSR prospects
+
+`find_csr_prospects` and `check_company` answer from a local index of
+companies and their CSR programs, where **every claim cites an excerpt
+verified to appear on the company's own pages**. `csrctl` fills it:
+
+```bash
+csrctl import ../csr-seed-companies.csv   # seed companies (CSV/JSON)
+csrctl crawl                               # find CSR pages, extract profiles
+csrctl companies                           # review; `csrctl show NAME` for details
+```
+
+How CSR pages are found and recorded (the routing record), how extraction
+is verified, and how companies are scored against
+`config/institution-profile.yaml` (adjust it to Human Initiative's
+programs) is documented in
+[internal/websearch/csr/README.md](internal/websearch/csr/README.md).
 
 ## Configuration
 

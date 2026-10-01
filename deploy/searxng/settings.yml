@@ -15,3 +15,21 @@ search:
   formats: [html, json]
   default_lang: "id"
   safe_search: 1
+
+# Every query goes to all enabled engines at once, so spreading it across
+# several independent engines matters: during a real crawl of the seed list
+# the default set (brave, google cse, duckduckgo) was rate-limited within
+# minutes, leaving no working engine. Bing, Google and Yahoo were measured
+# to work from the same host. DuckDuckGo is blocked by Indonesian ISPs, but
+# works from servers elsewhere, so it stays enabled.
+engines:
+  - name: bing
+    disabled: false
+  - name: google
+    disabled: false
+  - name: yahoo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: duckduckgo
+    disabled: false
