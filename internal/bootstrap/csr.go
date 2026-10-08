@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/HumanInitiative/agent-harness-go/internal/platform/config"
+	"github.com/HumanInitiative/agent-harness-go/internal/websearch"
 	"github.com/HumanInitiative/agent-harness-go/internal/websearch/csr"
 )
 
@@ -46,8 +47,8 @@ func LoadDiscoveryConfig(cfg config.CSRConfig) (csr.DiscoveryConfig, error) {
 // crawler with its own robots.txt-respecting web stack, so lookups are as
 // polite to company sites as the scheduled crawl.
 func NewOnDemand(web config.WebConfig, cfg config.CSRConfig, store *csr.Store, index *csr.Index,
-	extractor csr.Extractor, log *slog.Logger) (*csr.OnDemand, error) {
-	stack, err := NewWebStack(web, WebStackOptions{RespectRobots: true}, log)
+	extractor csr.Extractor, metrics *websearch.Metrics, log *slog.Logger) (*csr.OnDemand, error) {
+	stack, err := NewWebStack(web, WebStackOptions{RespectRobots: true, Metrics: metrics}, log)
 	if err != nil {
 		return nil, err
 	}

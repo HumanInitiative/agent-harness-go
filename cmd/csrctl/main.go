@@ -42,6 +42,7 @@ import (
 	"github.com/HumanInitiative/agent-harness-go/internal/bootstrap"
 	"github.com/HumanInitiative/agent-harness-go/internal/platform/config"
 	"github.com/HumanInitiative/agent-harness-go/internal/platform/logger"
+	"github.com/HumanInitiative/agent-harness-go/internal/websearch"
 	"github.com/HumanInitiative/agent-harness-go/internal/websearch/csr"
 )
 
@@ -152,7 +153,11 @@ func cmdCrawl(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, l
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	crawler, err := newCrawler(ctx, cfg, store, log, *discoverOnly)
+	web, err := crawlWebStack(cfg, log)
+	if err != nil {
+		return err
+	}
+	crawler, err := newCrawler(ctx, cfg, store, web, log, *discoverOnly)
 	if err != nil {
 		return err
 	}
@@ -175,6 +180,7 @@ func cmdCrawl(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, l
 		return err
 	}
 	printReport(out, report)
+	printWebHealth(out, log, web, nil)
 	return nil
 }
 
@@ -197,13 +203,17 @@ func cmdSchedule(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store
 	if err != nil {
 		return fmt.Errorf("-tz: %w", err)
 	}
-	crawler, err := newCrawler(ctx, cfg, store, log, *discoverOnly)
+	web, err := crawlWebStack(cfg, log)
+	if err != nil {
+		return err
+	}
+	crawler, err := newCrawler(ctx, cfg, store, web, log, *discoverOnly)
 	if err != nil {
 		return err
 	}
 	var discoverer *csr.Discoverer
 	if cfg.DiscoveryEnabled && !*discoverOnly {
-		if discoverer, err = newDiscoverer(ctx, cfg, store, log); err != nil {
+		if discoverer, err = newDiscoverer(ctx, cfg, store, web, log); err != nil {
 			return err
 		}
 	}
@@ -220,6 +230,7 @@ func cmdSchedule(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store
 		}
 
 		var report csr.CrawlReport
+		before := web.Metrics.Snapshot()
 		err := withCrawlLock(ctx, store, log, func(ctx context.Context) error {
 			// Discovery first, so the companies it adds are crawled tonight.
 			if discoverer != nil {
@@ -243,6 +254,7 @@ func cmdSchedule(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store
 			log.Error("scheduled CSR crawl failed", "error", err)
 		default:
 			printReport(out, report)
+			printWebHealth(out, log, web, before)
 		}
 	}
 }
@@ -258,7 +270,11 @@ func nextDailyRun(now time.Time, hour, minute int, loc *time.Location) time.Time
 }
 
 func cmdDiscover(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, log *slog.Logger, out io.Writer) error {
-	discoverer, err := newDiscoverer(ctx, cfg, store, log)
+	web, err := crawlWebStack(cfg, log)
+	if err != nil {
+		return err
+	}
+	discoverer, err := newDiscoverer(ctx, cfg, store, web, log)
 	if err != nil {
 		return err
 	}
@@ -268,11 +284,12 @@ func cmdDiscover(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store
 			return err
 		}
 		printDiscovery(out, report)
+		printWebHealth(out, log, web, nil)
 		return nil
 	})
 }
 
-func newDiscoverer(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, log *slog.Logger) (*csr.Discoverer, error) {
+func newDiscoverer(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, web bootstrap.WebStack, log *slog.Logger) (*csr.Discoverer, error) {
 	if cfg.GeminiAPIKey == "" {
 		return nil, errors.New("GEMINI_API_KEY is required for discovery")
 	}
@@ -281,14 +298,6 @@ func newDiscoverer(ctx context.Context, cfg config.CrawlerConfig, store *csr.Sto
 		return nil, err
 	}
 	profile, err := bootstrap.LoadInstitutionProfile(cfg.CSR)
-	if err != nil {
-		return nil, err
-	}
-	web, err := bootstrap.NewWebStack(cfg.Web, bootstrap.WebStackOptions{
-		RespectRobots:       true,
-		DomainRatePerSecond: 1 / cfg.DomainInterval.Seconds(),
-		SearchInterval:      cfg.SearchInterval,
-	}, log)
 	if err != nil {
 		return nil, err
 	}
@@ -334,19 +343,30 @@ func cmdCandidates(ctx context.Context, store *csr.Store, args []string, out io.
 	return nil
 }
 
-func newCrawler(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, log *slog.Logger, discoverOnly bool) (*csr.Crawler, error) {
-	// Automated crawling always honours robots.txt and goes slower than
-	// interactive use, both per site and towards search engines.
-	web, err := bootstrap.NewWebStack(cfg.Web, bootstrap.WebStackOptions{
+// crawlWebStack is the web stack of a csrctl process: automated crawling
+// always honours robots.txt and goes slower than interactive use, both per
+// site and towards search engines. Discovery and the crawl share it, so
+// their pacing and counters are shared too.
+func crawlWebStack(cfg config.CrawlerConfig, log *slog.Logger) (bootstrap.WebStack, error) {
+	return bootstrap.NewWebStack(cfg.Web, bootstrap.WebStackOptions{
 		RespectRobots:       true,
 		DomainRatePerSecond: 1 / cfg.DomainInterval.Seconds(),
 		SearchInterval:      cfg.SearchInterval,
 		MaxPDFBytes:         cfg.MaxPDFBytes,
 		PDFTimeout:          cfg.PDFTimeout,
 	}, log)
-	if err != nil {
-		return nil, err
-	}
+}
+
+// printWebHealth prints and logs how fetching and searching went since
+// before (a snapshot of the counters at the start of the run).
+func printWebHealth(out io.Writer, log *slog.Logger, web bootstrap.WebStack, before map[string]int64) {
+	run := web.Metrics.Since(before)
+	summary := websearch.Summarize(run)
+	fmt.Fprintf(out, "  web: %s\n", summary)
+	log.Info("web metrics", "summary", summary.String(), "counters", run)
+}
+
+func newCrawler(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, web bootstrap.WebStack, log *slog.Logger, discoverOnly bool) (*csr.Crawler, error) {
 	var extractor *csr.ProfileExtractor
 	if !discoverOnly {
 		if cfg.GeminiAPIKey == "" {

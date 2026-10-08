@@ -5,6 +5,7 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -38,6 +39,9 @@ type WebStackOptions struct {
 	// WebConfig.FetchTimeout for PDFs when > 0 (crawls read whole reports).
 	MaxPDFBytes int64
 	PDFTimeout  time.Duration
+	// Metrics, when set, is shared instead of creating a new set, so two
+	// stacks of one process report together.
+	Metrics *websearch.Metrics
 }
 
 // NewWebStack builds the fetcher and search router from configuration.
@@ -50,7 +54,10 @@ func NewWebStack(cfg config.WebConfig, opts WebStackOptions, log *slog.Logger) (
 	if opts.MaxPDFBytes > 0 {
 		maxPDF = opts.MaxPDFBytes
 	}
-	metrics := websearch.NewMetrics()
+	metrics := opts.Metrics
+	if metrics == nil {
+		metrics = websearch.NewMetrics()
+	}
 
 	// PDF reading is optional: without pdftotext, PDFs are reported as
 	// unreadable instead of the process refusing to start. A 380-page report
@@ -114,4 +121,31 @@ func NewWebStack(cfg config.WebConfig, opts WebStackOptions, log *slog.Logger) (
 		return WebStack{}, err
 	}
 	return WebStack{Fetcher: fetcher, Router: router, Metrics: metrics, PDF: pdf != nil}, nil
+}
+
+// LogMetricsEvery logs the web counters that changed, every interval, until
+// ctx ends, so a long-running process shows whether fetching and searching
+// stay healthy (a rising blocked count means sites or search engines are
+// refusing the server). It logs nothing while nothing changes.
+func LogMetricsEvery(ctx context.Context, metrics *websearch.Metrics, every time.Duration, log *slog.Logger) {
+	if every <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		var last map[string]int64
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				changed, now := metrics.Changed(last)
+				last = now
+				if len(changed) > 0 {
+					log.InfoContext(ctx, "web metrics", "summary", metrics.Summary().String(), "changed", changed)
+				}
+			}
+		}
+	}()
 }

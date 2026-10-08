@@ -40,6 +40,7 @@ import (
 	"github.com/HumanInitiative/agent-harness-go/internal/platform/config"
 	"github.com/HumanInitiative/agent-harness-go/internal/platform/logger"
 	"github.com/HumanInitiative/agent-harness-go/internal/ports/outbound"
+	"github.com/HumanInitiative/agent-harness-go/internal/websearch"
 	"github.com/HumanInitiative/agent-harness-go/internal/websearch/csr"
 )
 
@@ -86,11 +87,17 @@ func run() error {
 		tools.NewCurrentTimeTool(),
 		tools.NewCalculatorTool(),
 	}
+	// One set of web counters for everything the harness fetches and
+	// searches, logged periodically.
+	webMetrics := websearch.NewMetrics()
 	if cfg.Web.Enabled {
-		web, err := bootstrap.NewWebStack(cfg.Web, bootstrap.WebStackOptions{RespectRobots: cfg.Web.RespectRobotsOnFetch}, log)
+		web, err := bootstrap.NewWebStack(cfg.Web, bootstrap.WebStackOptions{
+			RespectRobots: cfg.Web.RespectRobotsOnFetch, Metrics: webMetrics,
+		}, log)
 		if err != nil {
 			return fmt.Errorf("initialize web tools: %w", err)
 		}
+		bootstrap.LogMetricsEvery(ctx, webMetrics, cfg.Web.MetricsLogInterval, log)
 		log.Info("web tools enabled", "providers", cfg.Web.Providers,
 			"respect_robots_on_fetch", cfg.Web.RespectRobotsOnFetch, "pdf", web.PDF)
 		registeredTools = append(registeredTools,
@@ -111,7 +118,7 @@ func run() error {
 		index := csr.NewIndex(store, profile, csr.IndexOptions{StaleAfter: cfg.CSR.StaleAfter})
 		checkCompany := tools.NewCheckCompanyTool(index, nil)
 		if cfg.CSR.OnDemandEnabled {
-			onDemand, err := bootstrap.NewOnDemand(cfg.Web, cfg.CSR, store, index, model, log)
+			onDemand, err := bootstrap.NewOnDemand(cfg.Web, cfg.CSR, store, index, model, webMetrics, log)
 			if err != nil {
 				return fmt.Errorf("initialize CSR on-demand lookups: %w", err)
 			}

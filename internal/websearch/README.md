@@ -84,6 +84,11 @@ forModel := websearch.Wrap(page.FinalURL, page.FetchedAt, text)
   partially), PDFs capped separately and rejected when oversized (refused
   before downloading when `Content-Length` already says so), request and PDF
   deadlines, redirect cap, bounded caches.
+- **Observability:** `Metrics` counts fetch outcomes (success, failure,
+  blocked by a WAF/403/429, unchanged, robots-disallowed), search outcomes
+  per provider and cache hits. `Summary` condenses them; the harness logs
+  the changed counters every `WEB_METRICS_LOG_MINUTES` and csrctl prints a
+  summary after every run.
 - **Prompt injection:** callers wrap content with `Wrap`; anything resembling
   the wrapper's own tags inside the content is neutralized.
 - **Politeness:** an identifying User-Agent with a contact address,

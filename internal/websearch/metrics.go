@@ -1,7 +1,9 @@
 package websearch
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -52,4 +54,72 @@ func (m *Metrics) Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// Changed returns the counters that differ from prev (a previous
+// Snapshot), with their current values, and the current snapshot to pass
+// next time.
+func (m *Metrics) Changed(prev map[string]int64) (changed, now map[string]int64) {
+	now = m.Snapshot()
+	changed = map[string]int64{}
+	for k, v := range now {
+		if prev[k] != v {
+			changed[k] = v
+		}
+	}
+	return changed, now
+}
+
+// Summary sums counters into the few numbers that tell whether crawling is
+// healthy: fetches that worked, failed, were blocked (WAF, 403, 429) or
+// confirmed unchanged, and searches that worked or failed across providers.
+func (m *Metrics) Summary() MetricsSummary {
+	return Summarize(m.Snapshot())
+}
+
+// Summarize is Summary over a snapshot, or over the difference of two
+// snapshots (see Since) to summarize one run.
+func Summarize(counters map[string]int64) MetricsSummary {
+	var s MetricsSummary
+	for k, v := range counters {
+		switch {
+		case k == "fetch.success":
+			s.FetchOK = v
+		case k == "fetch.failure":
+			s.FetchFailed = v
+		case k == "fetch.blocked":
+			s.FetchBlocked = v
+		case k == "fetch.not_modified":
+			s.FetchNotModified = v
+		case k == "fetch.robots_disallowed":
+			s.RobotsDisallowed = v
+		case strings.HasPrefix(k, "search.") && strings.HasSuffix(k, ".success"):
+			s.SearchOK += v
+		case strings.HasPrefix(k, "search.") && strings.HasSuffix(k, ".failure"):
+			s.SearchFailed += v
+		}
+	}
+	return s
+}
+
+// Since returns how much each counter grew since an earlier snapshot.
+func (m *Metrics) Since(earlier map[string]int64) map[string]int64 {
+	out := map[string]int64{}
+	for k, v := range m.Snapshot() {
+		if d := v - earlier[k]; d != 0 {
+			out[k] = d
+		}
+	}
+	return out
+}
+
+// MetricsSummary is the result of Summary.
+type MetricsSummary struct {
+	FetchOK, FetchFailed, FetchBlocked, FetchNotModified, RobotsDisallowed int64
+	SearchOK, SearchFailed                                                 int64
+}
+
+func (s MetricsSummary) String() string {
+	return fmt.Sprintf("fetch ok %d, failed %d (blocked %d), unchanged %d, robots-disallowed %d | search ok %d, failed %d",
+		s.FetchOK, s.FetchFailed, s.FetchBlocked, s.FetchNotModified, s.RobotsDisallowed, s.SearchOK, s.SearchFailed)
 }

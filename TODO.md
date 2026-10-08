@@ -74,8 +74,10 @@ document-level deduplication. See
       commit-check fix, then review: #1 and #2 are major bumps of
       `actions/checkout` and `actions/setup-go`, #3 moves the build image to
       Go 1.27, #4 is superseded by the module updates already on `main`.
-- [ ] Expose `websearch.Metrics` (fetch/search success, cache hits, blocks)
-      through an endpoint or periodic log so crawl health is visible.
+- [ ] Alert on crawl health: the harness logs "web metrics" every
+      `WEB_METRICS_LOG_MINUTES` and every csrctl run prints its web summary
+      (fetch ok/failed/blocked, search ok/failed); hook a log-based alert to
+      a rising blocked or search-failed count once hosting is chosen.
 
 ## Known limitations (accepted for now)
 

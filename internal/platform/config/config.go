@@ -200,6 +200,10 @@ type WebConfig struct {
 	// RespectRobotsOnFetch enforces robots.txt for agent-initiated fetches.
 	// When false, violations are only logged.
 	RespectRobotsOnFetch bool
+	// MetricsLogInterval is how often the harness logs the web counters
+	// that changed (fetch and search outcomes, blocks, cache hits). Zero
+	// turns it off.
+	MetricsLogInterval time.Duration
 }
 
 // keyFingerprintPattern matches an API key fingerprint (httpapi.KeyFingerprint).
@@ -339,6 +343,7 @@ func loadWeb(r *reader, requestTimeout time.Duration) WebConfig {
 		CacheTTL:             r.minutes("WEB_CACHE_TTL_MINUTES", 30),
 		DomainRatePerSecond:  r.positiveFloat("WEB_DOMAIN_REQUESTS_PER_SECOND", 1),
 		RespectRobotsOnFetch: r.boolean("WEB_FETCH_RESPECT_ROBOTS", true),
+		MetricsLogInterval:   time.Duration(r.nonNegativeInt("WEB_METRICS_LOG_MINUTES", 15)) * time.Minute,
 	}
 	defaultProviders := "duckduckgo"
 	if w.SearXNGURL != "" {

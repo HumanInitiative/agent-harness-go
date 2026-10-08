@@ -199,6 +199,13 @@ func (f *Fetcher) FetchIfModified(ctx context.Context, rawURL string, v Validato
 	}
 	if err != nil {
 		f.opts.Metrics.Inc("fetch.failure")
+		var se *StatusError
+		switch {
+		case errors.Is(err, ErrBlocked):
+			f.opts.Metrics.Inc("fetch.blocked") // a WAF challenge: the server's IP may be flagged
+		case errors.As(err, &se) && (se.StatusCode == 403 || se.StatusCode == 429):
+			f.opts.Metrics.Inc("fetch.blocked")
+		}
 		f.log.InfoContext(ctx, "web fetch failed", "url", key, "duration_ms", duration.Milliseconds(), "error", err)
 		return Page{}, err
 	}
