@@ -11,18 +11,17 @@ Phase 2.5 is done: programs are records with a lifecycle (active,
 expired, stale, inactive), answers come from the index with dates and
 stale warnings, long reports are read through rule-based page selection,
 and a daily crawl runs under a lock (compose service, CronJob and cron
-examples). See [internal/websearch/csr/README.md](internal/websearch/csr/README.md).
+examples, the CronJob tried on kind). Reports are rechecked with
+conditional requests, and page selection is measured on eight real
+reports (precision 0.90). See
+[internal/websearch/csr/README.md](internal/websearch/csr/README.md).
 Left open:
 
 - [ ] Run the first real extraction with programs (see "Run one real
       extraction" below) and review program names, dates and dropped
-      claims, especially from report pages.
-- [ ] Try the Kubernetes CronJob on a real cluster (written, not yet
-      applied anywhere).
+      claims, especially from report pages. Needs a Gemini API key.
 
 **Done when:** a real crawl's programs have been reviewed by a person.
-(Page selection is tuned and measured on eight real reports, including two
-English-only ones: precision 0.90, see the CSR README.)
 
 Semantic (embedding) search is deliberately deferred: add it only if FTS5
 plus synonyms proves insufficient on real questions, since it adds

@@ -6,6 +6,11 @@
 #   - a PersistentVolumeClaim "csr-data" holding the SQLite index at
 #     /app/data, mounted by the harness too.
 #
+# Tried on kind (Kubernetes 1.36, local-path volumes): the job ran next to
+# the harness on the shared volume with the read-only root file system, and
+# a second job started meanwhile exited at once naming the running one
+# (it fails, and is retried once under backoffLimit, also refused).
+#
 # The index is a SQLite file: the harness and this job must reach the same
 # volume on the same node. With a ReadWriteOnce volume, keep the job on the
 # harness's node (the affinity below); a network file system is not safe
