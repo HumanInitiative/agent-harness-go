@@ -27,28 +27,26 @@ Semantic (embedding) search is deliberately deferred: add it only if FTS5
 plus synonyms proves insufficient on real questions, since it adds
 embedding cost and another moving part.
 
-## Phase 3: open discovery and on-demand lookup
+## Phase 3 follow-ups
 
-From the original design (`websearch-csr-prompt.md`, section 7):
+Phase 3 is done: open discovery (`csrctl discover`, signals, promotion
+candidates), on-demand lookups in `check_company`, the review tools
+(`list_new_companies`, `set_company_status` for reviewer keys only),
+review notes for similar names and shared or group domains, and
+document-level deduplication. See
+[internal/websearch/csr/README.md](internal/websearch/csr/README.md),
+"Beyond the seed list". Left open:
 
-- [ ] `discover.go`: configurable query templates ("call for proposal CSR
-      {tahun}", "program CSR {sektor} {wilayah}", ...) → search → fetch →
-      extract which companies fund which programs → new companies with
-      `source='signal'`, `status='new'`, queued for resolve + crawl.
-- [ ] Flag strong, repeatedly seen signal companies as candidates for
-      promotion to the seed list (promotion stays manual).
-- [ ] `check_company` on-demand: when the company is not in the index,
-      resolve → fetch → extract → store with `source='on_demand'` → answer.
-- [ ] Review tools: `list_new_companies(limit)` and
-      `set_company_status(id, status)` (status only).
-- [ ] Parent vs. subsidiary ambiguity: detect similar names and shared
-      brands and flag them for review instead of merging. Seen live:
-      Vale Indonesia → vale.com, Indofood CBP → indofood.com.
-- [ ] Deduplicate evidence by canonical URL across sources.
-
-**Done when:** the Phase 3 acceptance tests pass (pipeline with fake
-provider/extractor and fixture pages; new companies are never `verified`
-automatically).
+- [ ] Run discovery for real (needs a Gemini key and a SearXNG instance
+      outside ISP filtering) and review the first signals and new
+      companies; tune `config/discovery.yaml` and `minSignalPageScore`
+      (`discover.go`) on what it finds.
+- [ ] Decide `CSR_REVIEWER_KEY_IDS` (who may verify companies through the
+      agent) and whether to enable `CSR_ON_DEMAND_ENABLED` in production.
+- [ ] A foreign parent's global site (Vale Indonesia on vale.com) is not
+      flagged; a rule on name and domain alone flagged only Indonesian
+      companies using .com. Detecting it needs the homepage content (a
+      site about many countries).
 
 ## Decisions and data waiting on people
 

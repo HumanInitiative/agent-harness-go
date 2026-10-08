@@ -122,7 +122,8 @@ internal/
                                       (LRU cap, per-conversation cap, TTL)
     outbound/tools/                  ToolHandlers: get_current_time, calculator,
                                       web_search, web_fetch, find_csr_prospects,
-                                      check_company
+                                      check_company, list_new_companies,
+                                      set_company_status
 
   websearch/                       standalone library behind web_search/web_fetch:
                                     search providers, SSRF-guarded fetching,
@@ -131,6 +132,7 @@ internal/
                                     discovery (routing record), report page
                                     selection, verified LLM extraction,
                                     programs and their lifecycle, scoring,
+                                    open discovery, on-demand lookups,
                                     crawl lock (see its README.md)
 
   bootstrap/                       wiring shared by cmd/harness and cmd/csrctl
@@ -139,6 +141,8 @@ internal/
     config/                          the only code that reads the environment;
                                       validates everything at startup
     logger/                          slog setup + request-scoped attributes
+    caller/                          who made the request (API key fingerprint),
+                                      for tools that authorize an action
 ```
 
 **Dependency rule:** `domain` and `application` import only `ports` and each
@@ -208,6 +212,12 @@ their pages stop mentioning them; only active ones are shown by default.
 Long PDF reports are read cheaply: rules pick the few program pages
 (3-5% of a 300-page report) and only those reach the model, once per
 version of the report.
+
+Beyond the seed list, open discovery (`csrctl discover`) searches for
+companies that fund programs and adds them for review, and
+`check_company` can look up an unknown company on its website on demand.
+Nothing is verified automatically: `list_new_companies` shows what awaits
+review, and only reviewer API keys may record decisions.
 
 How CSR pages are found and recorded (the routing record), how extraction
 is verified, how programs and reports are handled, and how companies are

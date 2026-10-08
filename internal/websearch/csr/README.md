@@ -27,7 +27,7 @@ seed CSV/JSON ──► companies ──► Resolver ──► company_pages (ro
 | `pages.go` | Rule-based selection of the CSR pages of long reports |
 | `lock.go` | Named lock so two crawls never overlap |
 | `seed.go` | CSV/JSON import, dedup by normalized name, per-row problem report |
-| `normalize.go` | Name normalization, brand tokens/acronyms, canonical URLs |
+| `normalize.go` | Name normalization, brand tokens/acronyms, canonical URLs, document keys |
 | `classify.go` | Scores a link as a CSR page, and decides its kind |
 | `resolve.go` | Confirms the domain, finds routes, records them |
 | `sitemap.go` | Sitemap and sitemap-index parsing |
@@ -35,6 +35,8 @@ seed CSV/JSON ──► companies ──► Resolver ──► company_pages (ro
 | `extract.go` | LLM extraction with verification of every claim |
 | `score.go` | Institution profile and explainable fit score |
 | `query.go` | `Index`: `FindProspects`, `CheckCompany`, freshness, free-text search |
+| `discover.go`, `signals.go` | Open discovery: query templates, signal extraction, similar-name review notes |
+| `ondemand.go` | Looking up a company that is not in the index, within a time budget |
 
 ## The routing record (`company_pages`)
 
@@ -242,6 +244,54 @@ current claims: every meaningful word must match, otherwise any word.
 Active programs in the institution's fields or regions add 10 points to
 the fit score; a company whose programs have all ended loses 10.
 
+## Beyond the seed list
+
+The seed list is where the index starts, not where it ends. Three ways in:
+
+**Open discovery** (`csrctl discover`, or before each scheduled crawl with
+`CSR_DISCOVERY_ENABLED=true`). Query templates in
+`config/discovery.yaml` ("call for proposal CSR {tahun}", "program CSR
+{fokus} {wilayah} {tahun}", ...) are filled with this year and the
+institution's focus areas and regions; each run takes the least recently
+run queries. Result pages already read, and social media, are skipped;
+only pages that score as CSR content (the page vocabulary above) go to
+the model, which names the companies the page says fund or run programs.
+A company is kept only if its excerpt is verbatim on the page and names
+it. Every sighting is a **signal** (page, excerpt, query); new companies
+get `source=signal`, `status=new` and are due for the regular crawl,
+which finds their site and builds their profile like any seed company.
+
+**On-demand lookups** (`CSR_ON_DEMAND_ENABLED=true`): `check_company` on a
+company the index does not know records it (`source=on_demand`) and
+crawls it right away within `CSR_ON_DEMAND_TIMEOUT_SECONDS` (default 40,
+shorter than the request timeout) and `CSR_ON_DEMAND_PER_HOUR` (default
+20). The answer says it was just looked up and is unverified; what does
+not finish in time, the nightly crawl completes.
+
+**Review.** Nothing is verified automatically. `list_new_companies` (a
+tool) and `csrctl companies -status new` show what awaits review;
+`csrctl candidates` lists discovered companies seen on three or more
+websites as candidates for the seed list (promotion stays manual). A
+person records decisions with `csrctl set-status`, or with the
+`set_company_status` tool, which works only for the API keys listed in
+`CSR_REVIEWER_KEY_IDS` (key fingerprints, as logged in `api_key_id`) and
+logs every change with the reviewer's key.
+
+**Same company, different names.** Companies are never merged
+automatically: a parent, a subsidiary and a sister company often fund
+different programs. Instead a review note is added when a new name
+resembles an indexed one (a word subset, as Indofood and Indofood CBP, or
+an acronym, as Bank BRI and Bank Rakyat Indonesia), when a domain is also
+another company's, or when a domain is only a brand other indexed
+companies carry too (indofood.com). A foreign parent's global site (Vale
+Indonesia on vale.com) is not detected: the rule tried for it flagged
+only Indonesian companies that use .com. Answers show the note.
+
+**Same document, different URLs.** Routes, evidence and signals are keyed
+by document (`DocumentKey`): with or without `www.`, over http or https,
+with or without tracking parameters, one document is fetched and stored
+once, whichever source found it.
+
 ## Scoring
 
 `InstitutionProfile` (YAML, see `config/institution-profile.yaml`) lists
@@ -268,7 +318,9 @@ csrctl crawl -discover-only                 # routes only, no LLM quota
 csrctl crawl                                # routes + extraction (GEMINI_API_KEY)
 csrctl schedule -at 02:00 -tz Asia/Jakarta  # crawl daily until stopped
 csrctl companies
-csrctl show "Bank Rakyat Indonesia"         # routes, profile, programs, evidence, dates
+csrctl show "Bank Rakyat Indonesia"         # routes, profile, programs, evidence, signals, dates
+csrctl discover                             # search for companies beyond the seed list
+csrctl candidates                           # discovered companies worth adding to the seed
 csrctl route pin 12 https://example.co.id/tjsl
 csrctl set-status 12 verified               # people verify; automation never does
 ```
