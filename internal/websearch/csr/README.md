@@ -126,13 +126,18 @@ of the pipeline together, so the work is split:
 1. **Download and convert** (no model): the PDF is streamed to a temporary
    file (`CSR_CRAWL_MAX_PDF_BYTES`, default 150 MB) and converted by
    `pdftotext`; the 85 MB report takes about 9 s including the download.
-2. **Choose pages** (rules, `SelectPages`): every page is scored with a
-   weighted CSR vocabulary (TJSL, penerima manfaat, beasiswa, mitra
-   binaan, amounts in Rupiah, ... up; table of contents, financial
-   statements, governance, emissions ... down). The best pages up to about
-   8k tokens are kept, in page order. On both reports this picked the TJSL
-   program pages ("Program Unggulan Bidang Prioritas", "Pilar 4:
-   Masyarakat", "Matriks Kontribusi Program"): **3-5% of the text**.
+2. **Choose pages** (rules, `SelectPages`): lines repeated on many pages
+   (running headers, footers, navigation bars) are removed first. Each
+   page is then scored with a weighted CSR vocabulary in Indonesian and
+   English (TJSL, penerima manfaat, beasiswa, mitra binaan, MSME,
+   livelihood, amounts in Rupiah ... up; table of contents, financial
+   statements, employee training hours, human rights, procurement ...
+   down), counting repeats up to three times, so a program page that keeps
+   returning to its subject beats a summary page naming many subjects
+   once. A page also inherits 30% of its stronger neighbour's score,
+   because reports describe programs in runs of pages and a page deep in a
+   run often names only its own program. The best pages up to about 8k
+   tokens are kept, in page order: **3-5% of a long report**.
 3. **Extract** (model, once per version of the report): only the chosen
    pages are sent, each marked `[Halaman N]`. Evidence from a report links
    to its page (`report.pdf#page=229`), and an excerpt counts only if it is
@@ -144,8 +149,28 @@ Reports are rechecked every 90 days; an unchanged report (same content
 hash) is never sent to the model again. A report without any page that
 looks like CSR content is skipped without a model call.
 
-`go test -tags live -run Live ./internal/websearch/csr/` repeats the
-download, conversion and page selection on a real report.
+### Measured page selection (2026-10-08)
+
+Eight real reports, with the pages that describe community or CSR
+programs marked by hand: banking (BCA, Bank Mandiri, BNI), food (Charoen
+Pokphand), insurance (Asuransi Astra) and mining (Merdeka Gold, RAIN,
+Medco), bilingual, Indonesian-only and English-only. Precision is the
+share of selected pages that are program pages:
+
+| Rules | Mean precision | English-only (Medco, BNI) |
+|---|---|---|
+| First version (presence of terms, mostly Indonesian vocabulary) | 0.67 | 0.80, 0.50 |
+| Current (headers removed, capped repeats, neighbours, bilingual vocabulary) | 0.90 | 1.00, 0.90 |
+
+The English-only reports were not used for tuning; they were added
+afterwards to check that the rules carry over. Most remaining misses are
+summary pages that do mention CSR programs (a materiality topic
+"Pengembangan Masyarakat", a TPB contribution table).
+
+`go test -tags live -run Live -timeout 30m ./internal/websearch/csr/`
+repeats the measurement on the same reports (downloading about 200 MB)
+and fails if mean precision drops below 0.8; run it after changing the
+rules.
 
 ## Extraction you can trust
 

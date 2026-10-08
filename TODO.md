@@ -17,9 +17,6 @@ Left open:
 - [ ] Run the first real extraction with programs (see "Run one real
       extraction" below) and review program names, dates and dropped
       claims, especially from report pages.
-- [ ] Tune the page-selection vocabulary (`pages.go`) on more reports,
-      including English-only ones; so far it is measured on two MIND ID
-      reports.
 - [ ] Conditional requests (`ETag` / `If-Modified-Since`) for reports, so
       an unchanged 100 MB PDF is not downloaded again at its 90-day
       recheck. Low priority: the content hash already prevents a second
@@ -27,8 +24,9 @@ Left open:
 - [ ] Try the Kubernetes CronJob on a real cluster (written, not yet
       applied anywhere).
 
-**Done when:** a real crawl's programs have been reviewed by a person and
-the vocabulary adjusted where it picked the wrong pages.
+**Done when:** a real crawl's programs have been reviewed by a person.
+(Page selection is tuned and measured on eight real reports, including two
+English-only ones: precision 0.90, see the CSR README.)
 
 Semantic (embedding) search is deliberately deferred: add it only if FTS5
 plus synonyms proves insufficient on real questions, since it adds
@@ -94,6 +92,10 @@ automatically).
 - Only the rule-selected pages of a long report (about 8k tokens) reach
   the model; a program described only on a page the rules score low is
   missed.
+- Some company sites send an incomplete TLS certificate chain (seen on
+  cp.co.id). Browsers and curl on macOS fetch the missing intermediate;
+  Go does not, so those sites are unreachable until they fix their
+  server.
 - Single instance only: SQLite index, in-memory conversations, per-process
   rate limits. Scaling out needs shared storage (see README, "Scaling
   beyond one instance").
