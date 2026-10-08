@@ -265,3 +265,50 @@ func TestStore_SaveExtractionRejectsUnsupportedClaimsAtomically(t *testing.T) {
 		t.Fatalf("a failed save must not leave evidence behind, found %d rows", count)
 	}
 }
+
+func TestStore_SameDocumentIsStoredOnce(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	id := mustInsert(t, s, Company{Name: "Contoh"})
+
+	// Routes: the seed crawl found one spelling, discovery another.
+	a, _ := s.UpsertPage(ctx, Page{CompanyID: id, URL: "https://contoh.co.id/csr", Kind: KindCSRProgram, DiscoveredVia: ViaHomepage, Score: 5})
+	b, _ := s.UpsertPage(ctx, Page{CompanyID: id, URL: "http://www.contoh.co.id/csr?utm_source=x", Kind: KindCSRProgram, DiscoveredVia: ViaSearch, Score: 7})
+	pages, _ := s.Pages(ctx, id)
+	if a != b || len(pages) != 1 || pages[0].Score != 7 || pages[0].URL != "https://contoh.co.id/csr" {
+		t.Fatalf("one route expected, with the better score: %+v", pages)
+	}
+	// A different path, or a different report page, is a different document.
+	if DocumentKey("https://contoh.co.id/csr/") == DocumentKey("https://contoh.co.id/csr") ||
+		DocumentKey("https://contoh.co.id/r.pdf#page=2") == DocumentKey("https://contoh.co.id/r.pdf#page=3") {
+		t.Fatal("different documents must keep different keys")
+	}
+
+	// Evidence: the same excerpt reached through two spellings.
+	excerpt := "Beasiswa pendidikan untuk siswa di Banten"
+	for _, u := range []string{"https://contoh.co.id/csr", "https://www.contoh.co.id/csr"} {
+		ex := Extraction{
+			Evidence: []Evidence{{URL: u, Excerpt: excerpt, Kind: KindCSRProgram, FetchedAt: t0}},
+			Profile:  Profile{FocusAreas: []Claim{{Value: "pendidikan", EvidenceIDs: []int64{0}}}},
+			ReadURLs: []string{u},
+		}
+		if err := s.SaveExtraction(ctx, id, ex); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int
+	_ = s.db.QueryRow(`SELECT count(*) FROM evidence`).Scan(&count)
+	if count != 1 {
+		t.Fatalf("the same excerpt of the same document must be stored once, got %d rows", count)
+	}
+
+	// Signals: one page, two spellings.
+	for _, u := range []string{"https://berita.example/a", "http://www.berita.example/a"} {
+		if _, err := s.AddSignal(ctx, Signal{CompanyID: id, URL: u, Host: "berita.example", Excerpt: excerpt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if sigs, _ := s.Signals(ctx, id); len(sigs) != 1 {
+		t.Fatalf("one signal expected, got %d", len(sigs))
+	}
+}

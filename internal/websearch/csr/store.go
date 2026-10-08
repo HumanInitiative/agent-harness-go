@@ -348,6 +348,13 @@ func (s *Store) UpsertPage(ctx context.Context, p Page) (int64, error) {
 	if p.State == "" {
 		p.State = PageActive
 	}
+	// A route already recorded under another spelling of the same URL
+	// (www., http) is the same route.
+	if existing, err := s.routeForDocument(ctx, p.CompanyID, p.URL); err != nil {
+		return 0, err
+	} else if existing != "" {
+		p.URL = existing
+	}
 	now := ts(s.now())
 	_, err := s.db.ExecContext(ctx, `INSERT INTO company_pages
 		(company_id, url, kind, discovered_via, score, state, created_at, updated_at)
@@ -363,6 +370,27 @@ func (s *Store) UpsertPage(ctx context.Context, p Page) (int64, error) {
 	var id int64
 	err = s.db.QueryRowContext(ctx, `SELECT id FROM company_pages WHERE company_id = ? AND url = ?`, p.CompanyID, p.URL).Scan(&id)
 	return id, err
+}
+
+// routeForDocument returns the URL of a company's route for the same
+// document as rawURL (see DocumentKey), or "".
+func (s *Store) routeForDocument(ctx context.Context, companyID int64, rawURL string) (string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT url FROM company_pages WHERE company_id = ?`, companyID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	key := DocumentKey(rawURL)
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return "", err
+		}
+		if DocumentKey(u) == key {
+			return u, nil
+		}
+	}
+	return "", rows.Err()
 }
 
 // Pages returns a company's routes, best first.
@@ -486,6 +514,14 @@ func (s *Store) SaveExtraction(ctx context.Context, companyID int64, ex Extracti
 
 	ids := make([]int64, len(ex.Evidence))
 	for i, e := range ex.Evidence {
+		// The same excerpt of the same document, reached by another URL
+		// spelling (www., http), is stored once.
+		if id, err := sameEvidence(ctx, tx, companyID, e); err != nil {
+			return err
+		} else if id != 0 {
+			ids[i] = id
+			continue
+		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO evidence (company_id, url, title, excerpt, kind, fetched_at, published_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (company_id, url, excerpt) DO NOTHING`,
 			companyID, e.URL, e.Title, e.Excerpt, string(e.Kind), ts(e.FetchedAt), ts(e.PublishedAt))
@@ -622,6 +658,28 @@ func (s *Store) SaveExtraction(ctx context.Context, companyID int64, ex Extracti
 		return err
 	}
 	return tx.Commit()
+}
+
+// sameEvidence returns the ID of a stored excerpt identical to e on the
+// same document (see DocumentKey), or 0.
+func sameEvidence(ctx context.Context, q queryer, companyID int64, e Evidence) (int64, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id, url FROM evidence WHERE company_id = ? AND excerpt = ?`, companyID, e.Excerpt)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	key := DocumentKey(e.URL)
+	for rows.Next() {
+		var id int64
+		var u string
+		if err := rows.Scan(&id, &u); err != nil {
+			return 0, err
+		}
+		if DocumentKey(u) == key {
+			return id, nil
+		}
+	}
+	return 0, rows.Err()
 }
 
 // evidenceURLs maps a company's evidence row IDs to their URLs.

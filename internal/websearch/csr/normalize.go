@@ -148,3 +148,23 @@ func CanonicalURL(raw string) string {
 	}
 	return u.String()
 }
+
+// DocumentKey identifies a document regardless of how its URL was written:
+// with or without "www.", over http or https, with or without tracking
+// parameters. A "#page=N" fragment is kept, since evidence from a report
+// cites its page. Used to store each route and each excerpt once, whichever
+// source (seed crawl, discovery, on-demand lookup) found it. It returns ""
+// for non-http(s) URLs.
+func DocumentKey(raw string) string {
+	canonical := CanonicalURL(raw)
+	if canonical == "" {
+		return ""
+	}
+	u, _ := url.Parse(canonical)
+	u.Scheme = "https"
+	u.Host = HostKey(u.Host)
+	if orig, err := url.Parse(strings.TrimSpace(raw)); err == nil && strings.HasPrefix(orig.Fragment, "page=") {
+		u.Fragment = orig.Fragment
+	}
+	return u.String()
+}

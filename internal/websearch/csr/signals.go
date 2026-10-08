@@ -35,6 +35,16 @@ type Signal struct {
 // AddSignal records a signal; seeing the same company on the same page
 // again is not a new signal. It reports whether the signal was new.
 func (s *Store) AddSignal(ctx context.Context, sig Signal) (bool, error) {
+	// The same page under another spelling (www., http) is not a new signal.
+	existing, err := s.Signals(ctx, sig.CompanyID)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range existing {
+		if DocumentKey(e.URL) == DocumentKey(sig.URL) {
+			return false, nil
+		}
+	}
 	res, err := s.db.ExecContext(ctx, `INSERT INTO signals (company_id, url, host, title, excerpt, program, query, seen_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (company_id, url) DO NOTHING`,
 		sig.CompanyID, sig.URL, HostKey(sig.Host), sig.Title, sig.Excerpt, sig.Program, sig.Query, ts(s.now()))
@@ -426,7 +436,7 @@ func (s *Store) RecordQueryRun(ctx context.Context, query string, results, signa
 // PageRead reports whether discovery already read a page.
 func (s *Store) PageRead(ctx context.Context, rawURL string) (bool, error) {
 	var one int
-	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM discovery_pages WHERE url = ?`, CanonicalURL(rawURL)).Scan(&one)
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM discovery_pages WHERE url = ?`, DocumentKey(rawURL)).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -438,6 +448,6 @@ func (s *Store) PageRead(ctx context.Context, rawURL string) (bool, error) {
 func (s *Store) RecordPageRead(ctx context.Context, rawURL string, signals int) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO discovery_pages (url, read_at, signals) VALUES (?, ?, ?)
 		ON CONFLICT (url) DO UPDATE SET read_at = excluded.read_at, signals = excluded.signals`,
-		CanonicalURL(rawURL), ts(s.now()), signals)
+		DocumentKey(rawURL), ts(s.now()), signals)
 	return err
 }
