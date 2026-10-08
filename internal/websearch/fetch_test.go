@@ -319,14 +319,14 @@ func TestFetch_LargePDFIsStreamedWithItsOwnLimits(t *testing.T) {
 		o.MaxPDFBytes = 100_000
 		o.Timeout = 150 * time.Millisecond
 		o.PDFTimeout = 5 * time.Second
-		o.PDF = fakePDF{"Halaman 1\fHalaman 2"}
+		o.PDF = fakePDF{"\f\fHalaman 3\fHalaman 4\f"} // two image-only pages first
 	})
 	page, err := f.Fetch(context.Background(), srv.URL+"/report.pdf")
 	if err != nil || page.Kind != "pdf" || page.Bytes != len(pdf) || page.BodyTruncated {
 		t.Fatalf("PDF over MaxBodyBytes but within MaxPDFBytes: %+v, %v", page, err)
 	}
-	if !strings.Contains(page.Content, PageBreak) {
-		t.Errorf("page breaks must be kept: %q", page.Content)
+	if got := strings.Split(page.Content, PageBreak); len(got) < 4 || got[2] != "Halaman 3" {
+		t.Errorf("page breaks must be kept, leading empty pages included, so page numbers stay right: %q", page.Content)
 	}
 	if _, err := f.Fetch(context.Background(), srv.URL+"/slow.pdf"); err != nil {
 		t.Errorf("a PDF gets PDFTimeout, not Timeout: %v", err)

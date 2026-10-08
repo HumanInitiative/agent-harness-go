@@ -259,7 +259,10 @@ func (f *Fetcher) fetchWithin(ctx context.Context, u *url.URL, extendForPDF func
 			return Page{}, err
 		}
 		page.Bytes = int(n)
-		page.Content = strings.TrimSpace(text)
+		// Not TrimSpace: it would also strip the page breaks of leading
+		// pages without text (image-only covers), shifting every page
+		// number that follows.
+		page.Content = strings.Trim(text, " \t\r\n")
 		return page, nil
 	}
 
