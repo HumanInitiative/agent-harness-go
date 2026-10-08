@@ -5,73 +5,30 @@ Open work for agent-harness-go, in priority order. Each item says what
 [internal/websearch/README.md](internal/websearch/README.md) and
 [internal/websearch/csr/README.md](internal/websearch/csr/README.md).
 
-## Phase 2.5: keep the CSR index current and answer from it
+## Follow-ups to Phase 2.5
 
-The agent should answer CSR prospect questions from the local index, which a
-daily crawl keeps current, and never present an expired program as open.
-Today the index stores one profile per company with no notion of individual
-programs, validity, or staleness, and its answers carry no dates.
+Phase 2.5 is done: programs are records with a lifecycle (active,
+expired, stale, inactive), answers come from the index with dates and
+stale warnings, long reports are read through rule-based page selection,
+and a daily crawl runs under a lock (compose service, CronJob and cron
+examples). See [internal/websearch/csr/README.md](internal/websearch/csr/README.md).
+Left open:
 
-### Programs as first-class records
-- [ ] Add a `csr_programs` table: company, program name, focus areas,
-      regions, program types, year or period (start/end), proposal deadline,
-      `first_seen_at`, `last_seen_at`, status, and evidence IDs.
-- [ ] Extend the extraction schema and verification to return individual
-      programs; every program and every date on it must cite a verified
-      excerpt (same rule as profile claims today).
-- [ ] Migration v2 (via `PRAGMA user_version`) with tests that upgrade a
-      v1 database.
+- [ ] Run the first real extraction with programs (see "Run one real
+      extraction" below) and review program names, dates and dropped
+      claims, especially from report pages.
+- [ ] Tune the page-selection vocabulary (`pages.go`) on more reports,
+      including English-only ones; so far it is measured on two MIND ID
+      reports.
+- [ ] Conditional requests (`ETag` / `If-Modified-Since`) for reports, so
+      an unchanged 100 MB PDF is not downloaded again at its 90-day
+      recheck. Low priority: the content hash already prevents a second
+      model call.
+- [ ] Try the Kubernetes CronJob on a real cluster (written, not yet
+      applied anywhere).
 
-**Done when:** "Beasiswa 2023" and "Beasiswa 2026" from the same company are
-stored as two programs with their own dates and evidence.
-
-### Program lifecycle (deprecation without deleting)
-- [ ] `expired` when the end date or proposal deadline has passed: a date
-      rule, no LLM involved.
-- [ ] `stale` when a program is missing from one re-extraction of its
-      source pages, `inactive` after two consecutive misses.
-- [ ] Never delete: keep history for audit, show only active programs by
-      default.
-
-**Done when:** tests cover each transition, including a program that
-reappears (back to `active`).
-
-### Company-level freshness
-- [ ] Mark a profile `stale` when its last successful extraction is older
-      than 90 days (configurable) or when every route is `gone`/`blocked`.
-- [ ] Stale profiles stay visible but are labelled as stale and ranked last.
-
-**Done when:** a company whose CSR pages all disappeared is no longer shown
-as a current prospect without a warning.
-
-### Dates and DB-first answers in the tools
-- [ ] `find_csr_prospects` / `check_company` show "data as of" (extraction
-      date), "source checked" (last route check) and each evidence excerpt's
-      fetch date.
-- [ ] Filter to active programs by default; add an `include_inactive`
-      argument.
-- [ ] Use the existing FTS5 index for free-text program questions
-      ("program beasiswa di Banten"), on top of the structured filters.
-- [ ] System prompt and tool descriptions: answer CSR questions from the
-      index first; use `web_search`/`web_fetch` only as a fallback, labelled
-      "not yet verified in the index".
-
-**Done when:** an end-to-end test asks a prospect question and the answer
-cites evidence URLs with dates without any web request.
-
-### Daily crawl, safely
-- [ ] Locking so two crawls never overlap (a long run, or a manual run
-      during the scheduled one): a lock row in SQLite, released on exit or
-      expired after a timeout.
-- [ ] Ship schedules: host cron example and a Kubernetes CronJob manifest
-      (daily, e.g. 02:00 WIB), using the image's `csrctl crawl`.
-- [ ] Size `CSR_CRAWL_COMPANIES_PER_RUN` so a daily run finishes inside its
-      window at the current pacing (about 8 seconds per company per worker);
-      log a warning when due companies are left over.
-
-**Done when:** the compose and Kubernetes setups crawl daily without manual
-steps, and a second concurrent `csrctl crawl` exits immediately with a clear
-message.
+**Done when:** a real crawl's programs have been reviewed by a person and
+the vocabulary adjusted where it picked the wrong pages.
 
 Semantic (embedding) search is deliberately deferred: add it only if FTS5
 plus synonyms proves insufficient on real questions, since it adds
@@ -134,8 +91,9 @@ automatically).
 - JavaScript-only sites and WAF-protected sites cannot be fetched directly
   (about a third of the seed list); search is the way in, and extraction
   then only sees pages that are fetchable.
-- Long PDF reports are truncated before extraction; program pages are
-  preferred.
+- Only the rule-selected pages of a long report (about 8k tokens) reach
+  the model; a program described only on a page the rules score low is
+  missed.
 - Single instance only: SQLite index, in-memory conversations, per-process
   rate limits. Scaling out needs shared storage (see README, "Scaling
   beyond one instance").

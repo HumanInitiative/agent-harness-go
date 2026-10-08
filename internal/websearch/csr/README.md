@@ -13,23 +13,28 @@ seed CSV/JSON ──► companies ──► Resolver ──► company_pages (ro
                        domain check, homepage,     │ Crawler: check due routes,
                        sitemap, search, probes     │ hash content
                                                    ▼
-                                     ProfileExtractor (LLM) ── verify ──► evidence + csr_profile
+                         reports: SelectPages (rules) picks ~8 pages
+                                                   ▼
+                     ProfileExtractor (LLM) ── verify ──► evidence + csr_profile + csr_programs
                                                                               │
-                         find_csr_prospects / check_company ◄── Index + InstitutionProfile.Score
+     find_csr_prospects / check_company ◄── Index (dates, lifecycle, FTS5) + InstitutionProfile.Score
 ```
 
 | File | Responsibility |
 |---|---|
-| `store.go`, `schema.sql` | SQLite (WAL) with FTS5 over evidence; migrations via `PRAGMA user_version` |
+| `store.go`, `schema_v*.sql` | SQLite (WAL) with FTS5 over evidence and programs; stepwise migrations via `PRAGMA user_version` |
+| `programs.go` | Program records and their lifecycle (active, expired, stale, inactive) |
+| `pages.go` | Rule-based selection of the CSR pages of long reports |
+| `lock.go` | Named lock so two crawls never overlap |
 | `seed.go` | CSV/JSON import, dedup by normalized name, per-row problem report |
 | `normalize.go` | Name normalization, brand tokens/acronyms, canonical URLs |
 | `classify.go` | Scores a link as a CSR page, and decides its kind |
 | `resolve.go` | Confirms the domain, finds routes, records them |
 | `sitemap.go` | Sitemap and sitemap-index parsing |
-| `crawl.go` | Scheduled crawl: route checks, change detection, extraction, rescheduling |
+| `crawl.go` | Scheduled crawl: route checks, change detection, extraction, rescheduling, run limits |
 | `extract.go` | LLM extraction with verification of every claim |
 | `score.go` | Institution profile and explainable fit score |
-| `query.go` | `FindProspects`, `CheckCompany`, `Index` |
+| `query.go` | `Index`: `FindProspects`, `CheckCompany`, freshness, free-text search |
 
 ## The routing record (`company_pages`)
 
@@ -110,11 +115,43 @@ and government/academic domains are refused), and another bank's site
 accepted because both names contain "syariah" (now a generic word;
 off-domain routes from search also rank below the company's own pages).
 
+## Reading long reports: rules choose, the model reads a little
+
+Annual and sustainability reports are where many companies describe their
+CSR programs, and they are long: two measured MIND ID reports are 85 and
+101 MB, 264 and 380 pages, about 184k and 266k tokens of text. Sending
+whole reports to a model on every crawl would cost far more than the rest
+of the pipeline together, so the work is split:
+
+1. **Download and convert** (no model): the PDF is streamed to a temporary
+   file (`CSR_CRAWL_MAX_PDF_BYTES`, default 150 MB) and converted by
+   `pdftotext`; the 85 MB report takes about 9 s including the download.
+2. **Choose pages** (rules, `SelectPages`): every page is scored with a
+   weighted CSR vocabulary (TJSL, penerima manfaat, beasiswa, mitra
+   binaan, amounts in Rupiah, ... up; table of contents, financial
+   statements, governance, emissions ... down). The best pages up to about
+   8k tokens are kept, in page order. On both reports this picked the TJSL
+   program pages ("Program Unggulan Bidang Prioritas", "Pilar 4:
+   Masyarakat", "Matriks Kontribusi Program"): **3-5% of the text**.
+3. **Extract** (model, once per version of the report): only the chosen
+   pages are sent, each marked `[Halaman N]`. Evidence from a report links
+   to its page (`report.pdf#page=229`), and an excerpt counts only if it is
+   on a page the model was shown.
+4. **Judge fit** (rules, `Score`): the institution's fit is never asked of
+   a model, so asking many questions costs nothing.
+
+Reports are rechecked every 90 days; an unchanged report (same content
+hash) is never sent to the model again. A report without any page that
+looks like CSR content is skipped without a model call.
+
+`go test -tags live -run Live ./internal/websearch/csr/` repeats the
+download, conversion and page selection on a real report.
+
 ## Extraction you can trust
 
-The LLM reads up to four changed pages (program pages first), each wrapped
-as `<web_content untrusted="true">`, and must cite evidence for every
-claim. Its answer is untrusted input:
+The LLM reads up to four changed pages (program pages first; reports as
+selected pages), each wrapped as `<web_content untrusted="true">`, and
+must cite evidence for every claim. Its answer is untrusted input:
 
 - the shape is strict (unknown fields, a missing field or an out-of-range
   confidence trigger one corrective retry, then `ErrExtractionFailed`, and
@@ -127,10 +164,52 @@ claim. Its answer is untrusted input:
 - a proposal channel must be an email address or URL on the company's own
   (or brand-carrying) domain: free-mail addresses, social media, phone
   numbers and people's names are refused;
+- every program needs a verified excerpt, and **a date is kept only when a
+  cited excerpt contains its year**: the model cannot invent a deadline;
 - saving is transactional: claims are stored with the IDs of their
   evidence rows, or nothing is stored.
 
-Unchanged pages (same content hash) are never sent to the LLM again.
+Unchanged pages (same content hash) are never sent to the LLM again. An
+extraction replaces only what came from the pages it read: claims and
+programs known from other pages are kept.
+
+## Programs and their lifecycle
+
+Each program is a record of its own (`csr_programs`): name, description,
+focus areas, regions, types, period, proposal deadline, evidence, the
+pages it came from, and when it was first and last seen. The same program
+in different years ("Beasiswa 2023", "Beasiswa 2026") is two records.
+Nothing is deleted; status moves instead:
+
+| Status | When |
+|---|---|
+| `active` | seen in the latest extraction of its pages, dates not passed |
+| `expired` | its end date or proposal deadline has passed (a date rule, applied when read and stored by each crawl run) |
+| `stale` | its pages were re-read and it was missing once |
+| `inactive` | missing from two consecutive re-reads |
+
+A program that reappears becomes `active` again. A program is only
+counted as missing when every page it came from was re-read.
+
+## Answers: from the index, with dates
+
+The tools never fetch anything; they answer from the index and show:
+
+- **"Data per"**: when the model last read the company's pages, and when a
+  page was last successfully checked (an unchanged page confirms the data
+  without a model call);
+- each evidence excerpt's URL and fetch date;
+- programs with status, period and deadline; only active ones unless
+  `include_inactive` is set;
+- a **stale** warning, ranked last, when no page confirmed the data for
+  `CSR_STALE_AFTER_DAYS` (default 120, above the 90-day report recheck) or
+  every recorded page is gone or blocked.
+
+`find_csr_prospects` also takes free text (`query`, e.g. "beasiswa
+Banten"), matched with FTS5 against programs and against the evidence of
+current claims: every meaningful word must match, otherwise any word.
+Active programs in the institution's fields or regions add 10 points to
+the fit score; a company whose programs have all ended loses 10.
 
 ## Scoring
 
@@ -141,7 +220,9 @@ focus areas, regions and program types. `Score` sums explained parts:
 - region proven by the pages: 20 (nationwide: 15; only the seed's label: 5);
 - program type match: 10;
 - the company invites proposals: 15;
-- an official proposal channel exists: 10.
+- an official proposal channel exists: 10;
+- an active program in the institution's fields or regions: 10 (all
+  recorded programs ended: minus 10).
 
 Synonyms connect the vocabulary of the company's pages to the institution's
 profile ("beasiswa" → pendidikan, "UMKM" → pemberdayaan ekonomi, "Jabar" →
@@ -154,14 +235,29 @@ confidence is flagged rather than hidden.
 csrctl import ../csr-seed-companies.csv     # idempotent; reports skipped rows
 csrctl crawl -discover-only                 # routes only, no LLM quota
 csrctl crawl                                # routes + extraction (GEMINI_API_KEY)
+csrctl schedule -at 02:00 -tz Asia/Jakarta  # crawl daily until stopped
 csrctl companies
-csrctl show "Bank Rakyat Indonesia"
+csrctl show "Bank Rakyat Indonesia"         # routes, profile, programs, evidence, dates
 csrctl route pin 12 https://example.co.id/tjsl
 csrctl set-status 12 verified               # people verify; automation never does
 ```
 
-Run `csrctl crawl` from a scheduler (host cron, a Kubernetes CronJob), never
-from a timer inside the harness. Crawls are deliberately slow (5 s between
-requests to one site, 6 s between searches): a faster test crawl got the
-SearXNG instance's upstream engines suspended and one company's WAF
-blocking the server's IP within minutes.
+Crawling runs outside the harness, daily: the `csr-crawler` service in
+`deploy/docker-compose.yml` (`csrctl schedule`), a Kubernetes CronJob
+(`deploy/kubernetes/csr-crawl-cronjob.yaml`) or host cron
+(`deploy/cron/csr-crawl.cron`). Each run:
+
+- takes a **lock** in the database: a second crawl (a manual run during
+  the scheduled one) exits at once with a message naming the running one;
+  a crashed crawl's lock expires after 15 minutes;
+- stores the `expired` status of programs whose dates passed;
+- handles at most `CSR_CRAWL_COMPANIES_PER_RUN` due companies (default
+  100) and starts none after `CSR_CRAWL_MAX_RUN_MINUTES` (default 180);
+  companies left over are reported and logged as a warning, which is the
+  signal to raise the limit or run more often.
+
+Crawls are deliberately slow (5 s between requests to one site, 6 s
+between searches): a faster test crawl got the SearXNG instance's upstream
+engines suspended and one company's WAF blocking the server's IP within
+minutes. Route checks took about 8 s per company per worker in a measured
+crawl; extraction and large report downloads add to that.

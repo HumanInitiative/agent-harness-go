@@ -97,7 +97,7 @@ After changing an annotation, run `make swagger` and commit `api/swagger/`
 
 ```
 cmd/harness/main.go                composition root of the HTTP service
-cmd/csrctl/                        CLI for the CSR index: import, crawl, review
+cmd/csrctl/                        CLI for the CSR index: import, crawl, schedule, review
 api/swagger/                       generated OpenAPI spec (make swagger)
 
 internal/
@@ -121,14 +121,17 @@ internal/
     outbound/memory/                 ConversationStore in bounded memory
                                       (LRU cap, per-conversation cap, TTL)
     outbound/tools/                  ToolHandlers: get_current_time, calculator,
-                                      web_search, web_fetch
+                                      web_search, web_fetch, find_csr_prospects,
+                                      check_company
 
   websearch/                       standalone library behind web_search/web_fetch:
                                     search providers, SSRF-guarded fetching,
                                     robots.txt, extraction (see its README.md)
     csr/                             CSR prospect index: seed import, CSR page
-                                    discovery (routing record), verified LLM
-                                    extraction, scoring (see its README.md)
+                                    discovery (routing record), report page
+                                    selection, verified LLM extraction,
+                                    programs and their lifecycle, scoring,
+                                    crawl lock (see its README.md)
 
   bootstrap/                       wiring shared by cmd/harness and cmd/csrctl
 
@@ -192,14 +195,24 @@ verified to appear on the company's own pages**. `csrctl` fills it:
 
 ```bash
 csrctl import ../csr-seed-companies.csv   # seed companies (CSV/JSON)
-csrctl crawl                               # find CSR pages, extract profiles
+csrctl crawl                               # find CSR pages, extract profiles and programs
 csrctl companies                           # review; `csrctl show NAME` for details
 ```
 
+A daily crawl keeps the index current (the `csr-crawler` compose service,
+or the cron and Kubernetes examples in `deploy/`); only one crawl runs at
+a time. Answers come from the index, never from a live fetch, and carry
+dates: when the data was read and last confirmed, and each excerpt's fetch
+date. Programs expire by their dates and fade to stale and inactive when
+their pages stop mentioning them; only active ones are shown by default.
+Long PDF reports are read cheaply: rules pick the few program pages
+(3-5% of a 300-page report) and only those reach the model, once per
+version of the report.
+
 How CSR pages are found and recorded (the routing record), how extraction
-is verified, and how companies are scored against
-`config/institution-profile.yaml` (adjust it to Human Initiative's
-programs) is documented in
+is verified, how programs and reports are handled, and how companies are
+scored against `config/institution-profile.yaml` (adjust it to Human
+Initiative's programs) is documented in
 [internal/websearch/csr/README.md](internal/websearch/csr/README.md).
 
 ## Configuration
@@ -264,5 +277,10 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
   orchestrator's grace period above that: `stop_grace_period` in compose,
   `terminationGracePeriodSeconds` in Kubernetes.
 - **Probes:** point liveness at `/healthz` and readiness at `/readyz`.
+- **CSR crawl:** compose runs it daily at 02:00 WIB as the `csr-crawler`
+  service, sharing the index volume with the harness. Elsewhere, use
+  `deploy/kubernetes/csr-crawl-cronjob.yaml` or `deploy/cron/csr-crawl.cron`.
+  Downloaded reports pass through the temporary directory (up to
+  `CSR_CRAWL_MAX_PDF_BYTES` each, one per crawl worker).
 
 Without compose: `docker build -t agent-harness-go . && docker run --rm -p 8080:8080 --env-file .env agent-harness-go`.
