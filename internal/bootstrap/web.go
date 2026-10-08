@@ -34,6 +34,10 @@ type WebStackOptions struct {
 	DomainRatePerSecond float64
 	// SearchInterval spaces out upstream search queries; zero for none.
 	SearchInterval time.Duration
+	// MaxPDFBytes and PDFTimeout override WebConfig.MaxPDFBytes and
+	// WebConfig.FetchTimeout for PDFs when > 0 (crawls read whole reports).
+	MaxPDFBytes int64
+	PDFTimeout  time.Duration
 }
 
 // NewWebStack builds the fetcher and search router from configuration.
@@ -42,12 +46,18 @@ func NewWebStack(cfg config.WebConfig, opts WebStackOptions, log *slog.Logger) (
 	if opts.DomainRatePerSecond > 0 {
 		domainRate = opts.DomainRatePerSecond
 	}
+	maxPDF := cfg.MaxPDFBytes
+	if opts.MaxPDFBytes > 0 {
+		maxPDF = opts.MaxPDFBytes
+	}
 	metrics := websearch.NewMetrics()
 
 	// PDF reading is optional: without pdftotext, PDFs are reported as
-	// unreadable instead of the process refusing to start.
+	// unreadable instead of the process refusing to start. A 380-page report
+	// converts in about a second into ~1 MB of text; the limits leave room
+	// for far larger ones.
 	var pdf websearch.PDFExtractor
-	if p, err := websearch.NewPDFToText(30*time.Second, 2<<20); err != nil {
+	if p, err := websearch.NewPDFToText(2*time.Minute, 16<<20); err != nil {
 		log.Warn("PDF reading disabled", "reason", err)
 	} else {
 		pdf = p
@@ -57,6 +67,8 @@ func NewWebStack(cfg config.WebConfig, opts WebStackOptions, log *slog.Logger) (
 		UserAgent:           cfg.UserAgent,
 		Timeout:             cfg.FetchTimeout,
 		MaxBodyBytes:        cfg.MaxBodyBytes,
+		MaxPDFBytes:         maxPDF,
+		PDFTimeout:          opts.PDFTimeout,
 		RespectRobots:       opts.RespectRobots,
 		Guard:               websearch.Guard{},
 		DomainRatePerSecond: domainRate,

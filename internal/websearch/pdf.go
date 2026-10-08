@@ -4,15 +4,20 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"time"
 )
 
-// PDFExtractor turns a PDF document into plain text.
+// PDFExtractor turns a PDF file into plain text, with pages separated by
+// PageBreak.
 type PDFExtractor interface {
-	ExtractText(ctx context.Context, pdf []byte) (string, error)
+	ExtractText(ctx context.Context, path string) (string, error)
 }
+
+// PageBreak separates the pages of a PDF in Page.Content. It is the form
+// feed pdftotext writes after every page, kept so callers can work page by
+// page (e.g. pick the few pages of a 300-page report that matter).
+const PageBreak = "\f"
 
 // PDFToText extracts text by running poppler's pdftotext. It is optional:
 // when pdftotext is not installed, NewPDFToText reports ErrPDFUnavailable and
@@ -39,27 +44,13 @@ func NewPDFToTextAt(path string, timeout time.Duration, maxOutputBytes int) *PDF
 	return &PDFToText{path: path, timeout: timeout, maxOutput: maxOutputBytes}
 }
 
-// ExtractText implements PDFExtractor. The PDF goes through a temporary file
-// because pdftotext needs a seekable input.
-func (p *PDFToText) ExtractText(ctx context.Context, pdf []byte) (string, error) {
-	f, err := os.CreateTemp("", "websearch-*.pdf")
-	if err != nil {
-		return "", fmt.Errorf("websearch: pdf temp file: %w", err)
-	}
-	defer os.Remove(f.Name())
-	if _, err := f.Write(pdf); err != nil {
-		f.Close()
-		return "", fmt.Errorf("websearch: pdf temp file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return "", fmt.Errorf("websearch: pdf temp file: %w", err)
-	}
-
+// ExtractText implements PDFExtractor.
+func (p *PDFToText) ExtractText(ctx context.Context, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
 	var out bytes.Buffer
-	cmd := exec.CommandContext(ctx, p.path, "-enc", "UTF-8", "-q", f.Name(), "-")
+	cmd := exec.CommandContext(ctx, p.path, "-enc", "UTF-8", "-q", path, "-")
 	cmd.Stdout = &limitedBuffer{buf: &out, max: p.maxOutput}
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("websearch: pdftotext: %w", err)

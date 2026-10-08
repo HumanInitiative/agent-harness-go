@@ -143,6 +143,8 @@ func cmdCrawl(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, l
 		RespectRobots:       true,
 		DomainRatePerSecond: 1 / cfg.DomainInterval.Seconds(),
 		SearchInterval:      cfg.SearchInterval,
+		MaxPDFBytes:         cfg.MaxPDFBytes,
+		PDFTimeout:          cfg.PDFTimeout,
 	}, log)
 	if err != nil {
 		return err

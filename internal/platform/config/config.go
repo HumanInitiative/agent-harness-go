@@ -101,6 +101,10 @@ type CrawlerConfig struct {
 	// SearchInterval is the gap between search queries during a crawl, so
 	// upstream search engines do not rate-limit the SearXNG instance.
 	SearchInterval time.Duration
+	// MaxPDFBytes and PDFTimeout let a crawl read full annual and
+	// sustainability reports, which are often 50-150 MB.
+	MaxPDFBytes int64
+	PDFTimeout  time.Duration
 }
 
 // LoadCrawler reads CrawlerConfig from the process environment.
@@ -123,6 +127,8 @@ func LoadCrawlerFrom(getenv func(string) string) (CrawlerConfig, error) {
 		CompaniesPerRun: r.positiveInt("CSR_CRAWL_COMPANIES_PER_RUN", 25),
 		DomainInterval:  r.seconds("CSR_CRAWL_DOMAIN_INTERVAL_SECONDS", 5),
 		SearchInterval:  r.seconds("CSR_CRAWL_SEARCH_INTERVAL_SECONDS", 6),
+		MaxPDFBytes:     int64(r.positiveInt("CSR_CRAWL_MAX_PDF_BYTES", 150<<20)),
+		PDFTimeout:      r.seconds("CSR_CRAWL_PDF_TIMEOUT_SECONDS", 300),
 	}
 	forced := func(key string) string {
 		if key == "WEB_TOOLS_ENABLED" {
@@ -154,9 +160,11 @@ type WebConfig struct {
 	SearchLanguage string
 	// UserAgent identifies the harness to websites; it must carry a contact
 	// (URL or email) so site owners can reach us.
-	UserAgent           string
-	FetchTimeout        time.Duration
-	MaxBodyBytes        int64
+	UserAgent    string
+	FetchTimeout time.Duration
+	MaxBodyBytes int64
+	// MaxPDFBytes caps one PDF download (streamed to a temporary file).
+	MaxPDFBytes         int64
 	CacheTTL            time.Duration
 	DomainRatePerSecond float64
 	// RespectRobotsOnFetch enforces robots.txt for agent-initiated fetches.
@@ -274,6 +282,7 @@ func loadWeb(r *reader, requestTimeout time.Duration) WebConfig {
 		UserAgent:            r.str("WEB_USER_AGENT", defaultWebUserAgent),
 		FetchTimeout:         r.seconds("WEB_FETCH_TIMEOUT_SECONDS", 15),
 		MaxBodyBytes:         int64(r.positiveInt("WEB_MAX_BODY_BYTES", 5<<20)),
+		MaxPDFBytes:          int64(r.positiveInt("WEB_MAX_PDF_BYTES", 20<<20)),
 		CacheTTL:             r.minutes("WEB_CACHE_TTL_MINUTES", 30),
 		DomainRatePerSecond:  r.positiveFloat("WEB_DOMAIN_REQUESTS_PER_SECOND", 1),
 		RespectRobotsOnFetch: r.boolean("WEB_FETCH_RESPECT_ROBOTS", true),

@@ -44,14 +44,16 @@ type Page struct {
 	// Content is the raw document.
 	Kind string
 	// Content is the extracted text (light markdown for HTML). It is not
-	// truncated to any token budget; use Truncate for that.
+	// truncated to any token budget; use Truncate for that. For PDFs, pages
+	// are separated by PageBreak.
 	Content string
 	// Links lists every hyperlink on the page, navigation and footer
 	// included (which Content omits), so callers can look for specific
 	// sections such as a CSR page.
 	Links []Link
 	// Bytes is how many body bytes were read; BodyTruncated reports that
-	// the body hit the size limit and only its beginning was used.
+	// the body hit the size limit and only its beginning was used (never
+	// for PDFs: an oversized PDF is ErrTooLarge).
 	Bytes         int
 	BodyTruncated bool
 	FetchedAt     time.Time

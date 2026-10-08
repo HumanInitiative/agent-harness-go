@@ -21,7 +21,12 @@ import (
 
 type fakePDF struct{ text string }
 
-func (f fakePDF) ExtractText(context.Context, []byte) (string, error) { return f.text, nil }
+func (f fakePDF) ExtractText(_ context.Context, path string) (string, error) {
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("the PDF must be on disk: %w", err)
+	}
+	return f.text, nil
+}
 
 // testFetcher builds a Fetcher allowed to reach the given httptest server.
 // Everything else (robots, size limits, redirects) behaves as in production.
@@ -283,6 +288,63 @@ func TestFetch_ContentTypes(t *testing.T) {
 	}
 }
 
+func TestFetch_LargePDFIsStreamedWithItsOwnLimits(t *testing.T) {
+	pdf := "%PDF-1.7 " + strings.Repeat("x", 50_000)
+	var downloads atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/report.pdf", "/slow.pdf":
+			downloads.Add(1)
+			w.Header().Set("Content-Type", "application/pdf")
+			_, _ = io.WriteString(w, pdf[:100])
+			w.(http.Flusher).Flush()
+			if r.URL.Path == "/slow.pdf" {
+				time.Sleep(300 * time.Millisecond) // longer than Timeout, within PDFTimeout
+			}
+			_, _ = io.WriteString(w, pdf[100:])
+		case "/slow.html":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = io.WriteString(w, "<html><body>")
+			w.(http.Flusher).Flush()
+			time.Sleep(300 * time.Millisecond)
+			_, _ = io.WriteString(w, "late</body></html>")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	f, _ := testFetcher(t, srv, func(o *FetcherOptions) {
+		o.MaxBodyBytes = 1000 // far below the PDF: PDFs have their own limit
+		o.MaxPDFBytes = 100_000
+		o.Timeout = 150 * time.Millisecond
+		o.PDFTimeout = 5 * time.Second
+		o.PDF = fakePDF{"Halaman 1\fHalaman 2"}
+	})
+	page, err := f.Fetch(context.Background(), srv.URL+"/report.pdf")
+	if err != nil || page.Kind != "pdf" || page.Bytes != len(pdf) || page.BodyTruncated {
+		t.Fatalf("PDF over MaxBodyBytes but within MaxPDFBytes: %+v, %v", page, err)
+	}
+	if !strings.Contains(page.Content, PageBreak) {
+		t.Errorf("page breaks must be kept: %q", page.Content)
+	}
+	if _, err := f.Fetch(context.Background(), srv.URL+"/slow.pdf"); err != nil {
+		t.Errorf("a PDF gets PDFTimeout, not Timeout: %v", err)
+	}
+	if _, err := f.Fetch(context.Background(), srv.URL+"/slow.html"); err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("HTML must still time out after Timeout, got %v", err)
+	}
+
+	small, _ := testFetcher(t, srv, func(o *FetcherOptions) { o.MaxPDFBytes = 10_000; o.PDF = fakePDF{"x"} })
+	before := downloads.Load()
+	if _, err := small.Fetch(context.Background(), srv.URL+"/report.pdf"); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("PDF over MaxPDFBytes: expected ErrTooLarge, got %v", err)
+	}
+	if downloads.Load() != before+1 {
+		t.Fatal("expected exactly one request")
+	}
+}
+
 func TestFetch_StatusErrorCarriesRetryAfter(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/robots.txt" {
@@ -340,12 +402,12 @@ func TestPDFToText_RunsBinary(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'Program CSR dari PDF'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, err := NewPDFToTextAt(script, 5*time.Second, 1<<20).ExtractText(context.Background(), []byte("%PDF"))
+	got, err := NewPDFToTextAt(script, 5*time.Second, 1<<20).ExtractText(context.Background(), filepath.Join(dir, "report.pdf"))
 	if err != nil || strings.TrimSpace(got) != "Program CSR dari PDF" {
 		t.Fatalf("got %q, %v", got, err)
 	}
 
-	capped, err := NewPDFToTextAt(script, 5*time.Second, 7).ExtractText(context.Background(), []byte("%PDF"))
+	capped, err := NewPDFToTextAt(script, 5*time.Second, 7).ExtractText(context.Background(), filepath.Join(dir, "report.pdf"))
 	if err != nil || capped != "Program" {
 		t.Fatalf("output cap not applied: %q, %v", capped, err)
 	}

@@ -45,7 +45,12 @@ curl -s localhost:8080/api/v1/chat -H "X-API-Key: $API_KEYS" -H 'Content-Type: a
 
 PDF reports become readable once `pdftotext` is installed (`apt install
 poppler-utils` / `brew install poppler`). Without it, PDFs return a clear
-error and the harness still starts.
+error and the harness still starts. PDFs are streamed to a temporary file
+(never held in memory) under their own size limit and deadline
+(`WEB_MAX_PDF_BYTES`, default 20 MiB for agent fetches; crawls use
+`CSR_CRAWL_MAX_PDF_BYTES`, default 150 MiB, because annual and
+sustainability reports are often 50-150 MB). Page breaks are kept in
+`Page.Content` as `websearch.PageBreak` so callers can work page by page.
 
 ## Using the package directly
 
@@ -73,8 +78,9 @@ forModel := websearch.Wrap(page.FinalURL, page.FetchedAt, text)
   rebinding), and every redirect hop is re-validated (max 5). Proxies are
   disabled because they would bypass the IP check.
 - **Resources:** body capped (default 5 MiB; oversized HTML is used
-  partially, oversized PDF is rejected), request timeout, redirect cap,
-  bounded caches.
+  partially), PDFs capped separately and rejected when oversized (refused
+  before downloading when `Content-Length` already says so), request and PDF
+  deadlines, redirect cap, bounded caches.
 - **Prompt injection:** callers wrap content with `Wrap`; anything resembling
   the wrapper's own tags inside the content is neutralized.
 - **Politeness:** an identifying User-Agent with a contact address,
