@@ -28,8 +28,9 @@ RUN apt-get update \
     && useradd --system --uid 65532 --no-create-home --shell /usr/sbin/nologin harness \
     && mkdir -p /app/data && chown 65532:65532 /app/data
 COPY --from=build /out/harness /out/csrctl /usr/local/bin/
-# The default institution profile; mount a different one over it to change it.
-COPY config/institution-profile.yaml /app/config/institution-profile.yaml
+# The default institution profile and discovery queries; mount different
+# ones over them to change them.
+COPY config/institution-profile.yaml config/discovery.yaml /app/config/
 
 # Relative paths in the configuration (CSR_DB_PATH=data/csr.db,
 # CSR_INSTITUTION_PROFILE=config/...) resolve here. Mount a volume at

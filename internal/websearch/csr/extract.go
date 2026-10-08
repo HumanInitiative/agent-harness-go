@@ -279,14 +279,8 @@ func (p *ProfileExtractor) Extract(ctx context.Context, c Company, sources []Sou
 // decodeExtraction checks the answer's shape: valid JSON, no fields outside
 // the schema, required fields present, confidence within [0, 1].
 func decodeExtraction(out []byte) (rawExtraction, error) {
-	out = bytes.TrimSpace(out)
-	// Some models wrap JSON in a markdown fence despite JSON mode.
-	out = bytes.TrimPrefix(out, []byte("```json"))
-	out = bytes.TrimPrefix(out, []byte("```"))
-	out = bytes.TrimSuffix(out, []byte("```"))
-
 	var raw rawExtraction
-	dec := json.NewDecoder(bytes.NewReader(out))
+	dec := json.NewDecoder(bytes.NewReader(trimFence(out)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&raw); err != nil {
 		return rawExtraction{}, fmt.Errorf("not valid JSON for the schema: %v", err)
@@ -298,6 +292,16 @@ func decodeExtraction(out []byte) (rawExtraction, error) {
 		return rawExtraction{}, fmt.Errorf("confidence %v is outside 0..1", *raw.Confidence)
 	}
 	return raw, nil
+}
+
+// trimFence removes the markdown fence some models wrap JSON in despite
+// JSON mode.
+func trimFence(out []byte) []byte {
+	out = bytes.TrimSpace(out)
+	out = bytes.TrimPrefix(out, []byte("```json"))
+	out = bytes.TrimPrefix(out, []byte("```"))
+	out = bytes.TrimSuffix(out, []byte("```"))
+	return bytes.TrimSpace(out)
 }
 
 // verify keeps only what the sources support. Anything discarded is listed

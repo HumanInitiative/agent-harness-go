@@ -106,6 +106,9 @@ type Company struct {
 	NextCrawlAt   time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	// ReviewNote says what a person should check about the record, such as
+	// a similar name already in the index. Empty when nothing stands out.
+	ReviewNote string
 }
 
 // Page is one entry of the routing record: a URL known to hold CSR-related

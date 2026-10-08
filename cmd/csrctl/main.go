@@ -8,6 +8,8 @@
 //	csrctl import seed.csv                 import or update seed companies
 //	csrctl crawl [-discover-only] [-company NAME]
 //	csrctl schedule [-at 02:00] [-tz Asia/Jakarta] [-discover-only]
+//	csrctl discover                        search for companies not in the seed list
+//	csrctl candidates [-min-hosts 3]       discovered companies worth adding to the seed
 //	csrctl companies [-status new] [-limit 50]
 //	csrctl show NAME                       routes, access, profile, evidence
 //	csrctl route pin COMPANY_ID URL        record a CSR page by hand
@@ -60,6 +62,9 @@ commands:
                                    crawl due companies (or one company now)
   schedule [-at HH:MM] [-tz ZONE] [-discover-only]
                                    crawl due companies every day at a fixed time
+                                   (and run discovery first if CSR_DISCOVERY_ENABLED)
+  discover                         search for companies that fund programs, add new ones
+  candidates [-min-hosts N]        discovered companies seen on N+ websites
   companies [-status S] [-limit N] list companies
   show NAME                        show a company's routes, profile and evidence
   route pin COMPANY_ID URL         record a CSR page by hand (never replaced automatically)
@@ -91,6 +96,10 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return cmdCrawl(ctx, cfg, store, log, rest, out)
 	case "schedule":
 		return cmdSchedule(ctx, cfg, store, log, rest, out)
+	case "discover":
+		return cmdDiscover(ctx, cfg, store, log, out)
+	case "candidates":
+		return cmdCandidates(ctx, store, rest, out)
 	case "companies":
 		return cmdCompanies(ctx, store, rest, out)
 	case "show":
@@ -192,6 +201,12 @@ func cmdSchedule(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store
 	if err != nil {
 		return err
 	}
+	var discoverer *csr.Discoverer
+	if cfg.DiscoveryEnabled && !*discoverOnly {
+		if discoverer, err = newDiscoverer(ctx, cfg, store, log); err != nil {
+			return err
+		}
+	}
 
 	for {
 		next := nextDailyRun(time.Now(), clock.Hour(), clock.Minute(), loc)
@@ -206,6 +221,15 @@ func cmdSchedule(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store
 
 		var report csr.CrawlReport
 		err := withCrawlLock(ctx, store, log, func(ctx context.Context) error {
+			// Discovery first, so the companies it adds are crawled tonight.
+			if discoverer != nil {
+				d, err := discoverer.RunOnce(ctx)
+				if err != nil {
+					log.Error("scheduled CSR discovery failed", "error", err)
+				} else {
+					printDiscovery(out, d)
+				}
+			}
 			var err error
 			report, err = crawler.RunOnce(ctx)
 			return err
@@ -231,6 +255,83 @@ func nextDailyRun(now time.Time, hour, minute int, loc *time.Location) time.Time
 		next = time.Date(local.Year(), local.Month(), local.Day()+1, hour, minute, 0, 0, loc)
 	}
 	return next
+}
+
+func cmdDiscover(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, log *slog.Logger, out io.Writer) error {
+	discoverer, err := newDiscoverer(ctx, cfg, store, log)
+	if err != nil {
+		return err
+	}
+	return withCrawlLock(ctx, store, log, func(ctx context.Context) error {
+		report, err := discoverer.RunOnce(ctx)
+		if err != nil {
+			return err
+		}
+		printDiscovery(out, report)
+		return nil
+	})
+}
+
+func newDiscoverer(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, log *slog.Logger) (*csr.Discoverer, error) {
+	if cfg.GeminiAPIKey == "" {
+		return nil, errors.New("GEMINI_API_KEY is required for discovery")
+	}
+	discovery, err := bootstrap.LoadDiscoveryConfig(cfg.CSR)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := bootstrap.LoadInstitutionProfile(cfg.CSR)
+	if err != nil {
+		return nil, err
+	}
+	web, err := bootstrap.NewWebStack(cfg.Web, bootstrap.WebStackOptions{
+		RespectRobots:       true,
+		DomainRatePerSecond: 1 / cfg.DomainInterval.Seconds(),
+		SearchInterval:      cfg.SearchInterval,
+	}, log)
+	if err != nil {
+		return nil, err
+	}
+	model, err := genkitmodel.New(ctx, genkitmodel.Config{Model: cfg.GenkitModel, APIKey: cfg.GeminiAPIKey}, log)
+	if err != nil {
+		return nil, err
+	}
+	return csr.NewDiscoverer(store, web.Router, web.Fetcher, csr.NewSignalExtractor(model, log), discovery, profile, nil, log), nil
+}
+
+func printDiscovery(out io.Writer, r csr.DiscoveryReport) {
+	fmt.Fprintf(out, "discovery: queries %d, results %d | pages read %d, sent to model %d | signals %d | new companies %d (similar names flagged %d)\n",
+		r.Queries, r.Results, r.PagesRead, r.PagesToModel, r.Signals, r.NewCompanies, r.Flagged)
+	for _, e := range r.Errors {
+		fmt.Fprintln(out, "  error:", e)
+	}
+}
+
+func cmdCandidates(ctx context.Context, store *csr.Store, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("candidates", flag.ContinueOnError)
+	minHosts := fs.Int("min-hosts", 3, "minimum number of different websites a company was seen on")
+	limit := fs.Int("limit", 50, "maximum rows")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	list, err := store.PromotionCandidates(ctx, *minHosts, *limit)
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		fmt.Fprintf(out, "no discovered company has been seen on %d or more websites yet\n", *minHosts)
+		return nil
+	}
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tNAME\tWEBSITES\tSIGNALS\tDOMAIN\tREVIEW NOTE")
+	for _, c := range list {
+		fmt.Fprintf(w, "%d\t%s\t%d\t%d\t%s\t%s\n", c.Company.ID, c.Company.Name, c.Hosts, c.Signals, dash(c.Company.Domain), dash(c.Company.ReviewNote))
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "\nAdd the ones that check out to the seed file and run `csrctl import` (a person decides; nothing is promoted automatically).")
+	return nil
 }
 
 func newCrawler(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, log *slog.Logger, discoverOnly bool) (*csr.Crawler, error) {
@@ -347,7 +448,7 @@ func cmdCompanies(ctx context.Context, store *csr.Store, args []string, out io.W
 		return err
 	}
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tDOMAIN\tDOMAIN STATUS\tACCESS\tROUTES\tCONFIDENCE\tSTATUS")
+	fmt.Fprintln(w, "ID\tNAME\tSOURCE\tDOMAIN\tDOMAIN STATUS\tACCESS\tROUTES\tCONFIDENCE\tSTATUS\tREVIEW")
 	for _, c := range companies {
 		access := "-"
 		if a, err := store.DomainAccess(ctx, c.Domain); err == nil {
@@ -363,7 +464,11 @@ func cmdCompanies(ctx context.Context, store *csr.Store, args []string, out io.W
 				usable++
 			}
 		}
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%d\t%.2f\t%s\n", c.ID, c.Name, dash(c.Domain), c.DomainStatus, access, usable, c.Confidence, c.Status)
+		review := "-"
+		if c.ReviewNote != "" {
+			review = "check (csrctl show)"
+		}
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%d\t%.2f\t%s\t%s\n", c.ID, c.Name, c.Source, dash(c.Domain), c.DomainStatus, access, usable, c.Confidence, c.Status, review)
 	}
 	return w.Flush()
 }
@@ -377,6 +482,9 @@ func cmdShow(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, ar
 		return err
 	}
 	fmt.Fprintf(out, "%s (id %d)\n  sector %s, region %s, source %s, review status %s\n", c.Name, c.ID, dash(c.Sector), dash(c.Region), c.Source, c.Status)
+	if c.ReviewNote != "" {
+		fmt.Fprintf(out, "  REVIEW: %s\n", c.ReviewNote)
+	}
 	fmt.Fprintf(out, "  domain %s (%s)", dash(c.Domain), c.DomainStatus)
 	if a, err := store.DomainAccess(ctx, c.Domain); err == nil {
 		fmt.Fprintf(out, ", access %s %s", a.Status, a.Detail)
@@ -394,6 +502,17 @@ func cmdShow(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, ar
 	}
 	if err := w.Flush(); err != nil {
 		return err
+	}
+
+	signals, err := store.Signals(ctx, c.ID)
+	if err != nil {
+		return err
+	}
+	if len(signals) > 0 {
+		fmt.Fprintln(out, "\nsignals (where discovery saw the company):")
+		for _, sg := range signals {
+			fmt.Fprintf(out, "  %s %s\n      %q\n", sg.SeenAt.UTC().Format("2006-01-02"), sg.URL, sg.Excerpt)
+		}
 	}
 
 	profile, err := bootstrap.LoadInstitutionProfile(cfg.CSR)

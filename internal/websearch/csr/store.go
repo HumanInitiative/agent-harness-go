@@ -22,9 +22,12 @@ var schemaV2 string
 //go:embed schema_v3.sql
 var schemaV3 string
 
+//go:embed schema_v4.sql
+var schemaV4 string
+
 // migrations[i] upgrades the schema from version i to i+1. Applied
 // migrations are never edited; a change is a new file.
-var migrations = []string{schemaV1, schemaV2, schemaV3}
+var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4}
 
 // ErrNotFound means the requested record does not exist.
 var ErrNotFound = errors.New("csr: not found")
@@ -129,13 +132,13 @@ func parseTS(v sql.NullString) time.Time {
 // --- companies --------------------------------------------------------------
 
 const companyColumns = `id, name, name_normalized, coalesce(domain,''), domain_status, coalesce(csr_url,''),
-	sector, region, source, status, confidence, last_crawled_at, next_crawl_at, created_at, updated_at`
+	sector, region, source, status, confidence, last_crawled_at, next_crawl_at, created_at, updated_at, review_note`
 
 func scanCompany(row interface{ Scan(...any) error }) (Company, error) {
 	var c Company
 	var lastCrawled, nextCrawl, created, updated sql.NullString
 	err := row.Scan(&c.ID, &c.Name, &c.NameNormalized, &c.Domain, &c.DomainStatus, &c.CSRURL,
-		&c.Sector, &c.Region, &c.Source, &c.Status, &c.Confidence, &lastCrawled, &nextCrawl, &created, &updated)
+		&c.Sector, &c.Region, &c.Source, &c.Status, &c.Confidence, &lastCrawled, &nextCrawl, &created, &updated, &c.ReviewNote)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Company{}, ErrNotFound
 	}

@@ -71,6 +71,8 @@ type CSRConfig struct {
 	// StaleAfter is how long a company's CSR data counts as current
 	// without any of its pages being successfully checked.
 	StaleAfter time.Duration
+	// DiscoveryConfigPath is the YAML file of open-discovery queries.
+	DiscoveryConfigPath string
 }
 
 func loadCSR(r *reader) CSRConfig {
@@ -79,6 +81,7 @@ func loadCSR(r *reader) CSRConfig {
 		DBPath:                 r.str("CSR_DB_PATH", "data/csr.db"),
 		InstitutionProfilePath: r.str("CSR_INSTITUTION_PROFILE", "config/institution-profile.yaml"),
 		StaleAfter:             time.Duration(r.positiveInt("CSR_STALE_AFTER_DAYS", 120)) * 24 * time.Hour,
+		DiscoveryConfigPath:    r.str("CSR_DISCOVERY_CONFIG", "config/discovery.yaml"),
 	}
 }
 
@@ -112,6 +115,9 @@ type CrawlerConfig struct {
 	// MaxRunDuration stops a run from starting new companies once it has
 	// run this long, so a scheduled run stays inside its window.
 	MaxRunDuration time.Duration
+	// DiscoveryEnabled makes `csrctl schedule` run open discovery before
+	// each crawl.
+	DiscoveryEnabled bool
 }
 
 // LoadCrawler reads CrawlerConfig from the process environment.
@@ -125,18 +131,19 @@ func LoadCrawler() (CrawlerConfig, error) {
 func LoadCrawlerFrom(getenv func(string) string) (CrawlerConfig, error) {
 	r := reader{getenv: getenv}
 	cfg := CrawlerConfig{
-		LogLevel:        r.level("LOG_LEVEL", slog.LevelInfo),
-		LogFormat:       r.oneOf("LOG_FORMAT", "json", "json", "text"),
-		GeminiAPIKey:    r.firstOf("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-		GenkitModel:     r.str("GENKIT_MODEL", "googleai/gemini-flash-latest"),
-		CSR:             loadCSR(&r),
-		Workers:         r.positiveInt("CSR_CRAWL_WORKERS", 4),
-		CompaniesPerRun: r.positiveInt("CSR_CRAWL_COMPANIES_PER_RUN", 100),
-		DomainInterval:  r.seconds("CSR_CRAWL_DOMAIN_INTERVAL_SECONDS", 5),
-		SearchInterval:  r.seconds("CSR_CRAWL_SEARCH_INTERVAL_SECONDS", 6),
-		MaxPDFBytes:     int64(r.positiveInt("CSR_CRAWL_MAX_PDF_BYTES", 150<<20)),
-		PDFTimeout:      r.seconds("CSR_CRAWL_PDF_TIMEOUT_SECONDS", 300),
-		MaxRunDuration:  r.minutes("CSR_CRAWL_MAX_RUN_MINUTES", 180),
+		LogLevel:         r.level("LOG_LEVEL", slog.LevelInfo),
+		LogFormat:        r.oneOf("LOG_FORMAT", "json", "json", "text"),
+		GeminiAPIKey:     r.firstOf("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+		GenkitModel:      r.str("GENKIT_MODEL", "googleai/gemini-flash-latest"),
+		CSR:              loadCSR(&r),
+		Workers:          r.positiveInt("CSR_CRAWL_WORKERS", 4),
+		CompaniesPerRun:  r.positiveInt("CSR_CRAWL_COMPANIES_PER_RUN", 100),
+		DomainInterval:   r.seconds("CSR_CRAWL_DOMAIN_INTERVAL_SECONDS", 5),
+		SearchInterval:   r.seconds("CSR_CRAWL_SEARCH_INTERVAL_SECONDS", 6),
+		MaxPDFBytes:      int64(r.positiveInt("CSR_CRAWL_MAX_PDF_BYTES", 150<<20)),
+		PDFTimeout:       r.seconds("CSR_CRAWL_PDF_TIMEOUT_SECONDS", 300),
+		MaxRunDuration:   r.minutes("CSR_CRAWL_MAX_RUN_MINUTES", 180),
+		DiscoveryEnabled: r.boolean("CSR_DISCOVERY_ENABLED", false),
 	}
 	forced := func(key string) string {
 		if key == "WEB_TOOLS_ENABLED" {

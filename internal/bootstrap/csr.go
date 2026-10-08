@@ -30,3 +30,13 @@ func LoadInstitutionProfile(cfg config.CSRConfig) (csr.InstitutionProfile, error
 	defer f.Close()
 	return csr.LoadInstitutionProfile(f)
 }
+
+// LoadDiscoveryConfig reads the open-discovery queries.
+func LoadDiscoveryConfig(cfg config.CSRConfig) (csr.DiscoveryConfig, error) {
+	f, err := os.Open(cfg.DiscoveryConfigPath)
+	if err != nil {
+		return csr.DiscoveryConfig{}, fmt.Errorf("bootstrap: open discovery config (CSR_DISCOVERY_CONFIG): %w", err)
+	}
+	defer f.Close()
+	return csr.LoadDiscoveryConfig(f)
+}

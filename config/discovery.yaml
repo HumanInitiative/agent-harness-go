@@ -1,0 +1,21 @@
+# Open discovery (csrctl discover): searches for companies that fund social
+# programs but are not in the seed list yet. Companies found this way are
+# added with status "new" for the regular crawl and a person's review;
+# nothing is ever verified automatically.
+#
+# Placeholders: {tahun} = this year, {fokus} / {wilayah} = each focus area /
+# region of config/institution-profile.yaml, {sektor} = each of `sectors`.
+# A template expands into one query per combination; each run takes the
+# least recently run ones.
+discovery:
+  queries:
+    - "call for proposal CSR {tahun}"
+    - "pengajuan proposal CSR perusahaan {tahun}"
+    - "program CSR {fokus} {wilayah} {tahun}"
+    - "perusahaan salurkan dana CSR {fokus} {tahun}"
+    - "program TJSL {fokus} {tahun}"
+    - "CSR perusahaan {sektor} {fokus}"
+  sectors: [perbankan, tambang, energi, telekomunikasi, consumer goods, perkebunan]
+  results_per_query: 8
+  queries_per_run: 10
+  pages_per_run: 30
