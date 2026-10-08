@@ -130,6 +130,22 @@ func (s *Store) SetReviewNote(ctx context.Context, companyID int64, note string)
 	return err
 }
 
+// AddReviewNote appends a note to a company's review note, unless the note
+// is already there.
+func (s *Store) AddReviewNote(ctx context.Context, companyID int64, note string) error {
+	c, err := s.Company(ctx, companyID)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(c.ReviewNote, note) {
+		return nil
+	}
+	if c.ReviewNote != "" {
+		note = c.ReviewNote + "; " + note
+	}
+	return s.SetReviewNote(ctx, companyID, note)
+}
+
 // SimilarCompanies returns companies whose names may denote the same
 // company or its group as name, without being the same normalized name:
 // one name's distinctive words are a subset of the other's ("Indofood" and

@@ -124,6 +124,13 @@ func (d *Resolver) Resolve(ctx context.Context, c Company) (ResolveResult, error
 			return res, err
 		}
 	}
+	if note, err := domainAmbiguity(ctx, d.store, c, res.Domain); err != nil {
+		return res, err
+	} else if note != "" {
+		if err := d.store.AddReviewNote(ctx, c.ID, note); err != nil {
+			return res, err
+		}
+	}
 
 	cands := map[string]candidate{}
 	add := func(rawURL, text, via string) {
@@ -180,6 +187,55 @@ func (d *Resolver) Resolve(ctx context.Context, c Company) (ResolveResult, error
 	d.log.InfoContext(ctx, "csr resolve finished", "company_id", c.ID, "domain", res.Domain,
 		"domain_status", res.DomainStatus, "access", res.Access, "found", res.Found)
 	return res, nil
+}
+
+// domainAmbiguity explains why a domain may belong to the company's parent,
+// subsidiary or sister company rather than the company itself, or returns
+// "". Seen live: Indofood CBP resolved to indofood.com (the group). Such
+// domains are kept, as they often are the best source available, but
+// flagged for a person.
+//
+// A foreign parent's global site (Vale Indonesia on vale.com) is not
+// detected: on the seed list, a rule for "X Indonesia" on a non-.id domain
+// flagged only Indonesian companies that simply use .com (AlamTri,
+// London Sumatra).
+func domainAmbiguity(ctx context.Context, store *Store, c Company, domain string) (string, error) {
+	domain = HostKey(domain)
+	if domain == "" {
+		return "", nil
+	}
+	others, err := store.queryCompanies(ctx, `SELECT `+companyColumns+` FROM companies WHERE id != ? ORDER BY id LIMIT 20000`, c.ID)
+	if err != nil {
+		return "", err
+	}
+	var shared []string
+	for _, o := range others {
+		if HostKey(o.Domain) == domain {
+			shared = append(shared, fmt.Sprintf("%s (id %d)", o.Name, o.ID))
+		}
+	}
+	if len(shared) > 0 {
+		return fmt.Sprintf("domain %s juga dipakai %s: mungkin situs induk atau grup", domain, strings.Join(shared, ", ")), nil
+	}
+
+	// The domain is only a brand that other indexed companies also carry:
+	// a group brand ("indofood" for Indofood CBP and Indofood Sukses Makmur).
+	label := strings.ReplaceAll(strings.Split(domain, ".")[0], "-", "")
+	mine := distinctiveWords(c.Name)
+	if len(mine) >= 2 && mine[label] {
+		var group []string
+		for _, o := range others {
+			if distinctiveWords(o.Name)[label] {
+				group = append(group, fmt.Sprintf("%s (id %d)", o.Name, o.ID))
+			}
+		}
+		if len(group) > 0 {
+			return fmt.Sprintf("domain %s hanya memuat merek %q yang juga dipakai %s: mungkin situs grup, bukan "+
+				"situs perusahaan ini sendiri", domain, label, strings.Join(group, ", ")), nil
+		}
+	}
+
+	return "", nil
 }
 
 type homeResult struct {

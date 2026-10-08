@@ -433,3 +433,56 @@ func sortedKeys(m map[string]string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// Mirrors live findings: Indofood CBP resolved to indofood.com. The seed
+// list's AlamTri and London Sumatra show why "X Indonesia" on a .com
+// domain is not flagged: they are Indonesian companies using .com.
+func TestDomainAmbiguity(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	mustInsert(t, s, Company{Name: "PT Indofood Sukses Makmur Tbk"})
+	mustInsert(t, s, Company{Name: "PT Astra International Tbk", Domain: "astra.co.id"})
+	cases := []struct {
+		name, domain, want string
+	}{
+		{"PT Indofood CBP Sukses Makmur Tbk", "indofood.com", `hanya memuat merek "indofood"`},
+		{"PT AlamTri Resources Indonesia Tbk", "alamtri.com", ""},
+		{"PT Astra Otoparts Tbk", "astra.co.id", "juga dipakai PT Astra International Tbk"},
+		{"PT Kalbe Farma Tbk", "kalbe.co.id", ""},
+		{"PT Unilever Indonesia Tbk", "unilever.co.id", ""},
+		{"PT Telkom Indonesia (Persero) Tbk", "telkom.co.id", ""},
+		{"PT Indosat Tbk", "ioh.co.id", ""},
+	}
+	for _, c := range cases {
+		id := mustInsert(t, s, Company{Name: c.name})
+		company, _ := s.Company(ctx, id)
+		note, err := domainAmbiguity(ctx, s, company, c.domain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (c.want == "") != (note == "") || !strings.Contains(note, c.want) {
+			t.Errorf("%s on %s: note %q, want %q", c.name, c.domain, note, c.want)
+		}
+	}
+}
+
+func TestResolve_RecordsDomainAmbiguityAsAReviewNote(t *testing.T) {
+	s := newTestStore(t)
+	mustInsert(t, s, Company{Name: "PT Indofood Sukses Makmur Tbk"})
+	id := mustInsert(t, s, Company{Name: "PT Indofood CBP Sukses Makmur Tbk", Domain: "indofood.com"})
+	web := newFakeWeb()
+	home := homepage()
+	home.Title = "Indofood"
+	web.pages["https://indofood.com/"] = home
+	r := NewResolver(s, web, nil, ResolveOptions{}, quietLogger())
+	c, _ := s.Company(context.Background(), id)
+	for i := 0; i < 2; i++ { // resolving again must not repeat the note
+		if _, err := r.Resolve(context.Background(), c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := s.Company(context.Background(), id)
+	if strings.Count(got.ReviewNote, "indofood.com") != 1 {
+		t.Fatalf("expected the note once: %q", got.ReviewNote)
+	}
+}
