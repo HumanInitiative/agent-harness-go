@@ -3,7 +3,7 @@
 # --- build stage -------------------------------------------------------
 # Keep this Go version >= the `go` directive in go.mod: official Go images
 # set GOTOOLCHAIN=local, so an older image cannot build this module.
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # Cache module downloads separately from source changes.
