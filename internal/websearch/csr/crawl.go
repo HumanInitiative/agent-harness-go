@@ -52,8 +52,8 @@ const (
 )
 
 // extractionOrder decides which routes the model reads first: program and
-// foundation pages describe CSR work directly; news and long reports (which
-// get truncated) come after.
+// foundation pages describe CSR work directly; news and long reports (of
+// which only selected pages are read) come after.
 var extractionOrder = map[PageKind]int{KindCSRProgram: 0, KindFoundation: 1, KindNews: 2, KindReport: 3}
 
 // Crawler runs the scheduled crawl: for each due company it checks the
@@ -94,7 +94,12 @@ type CrawlReport struct {
 	PagesChanged  int
 	Extracted     int
 	ExtractFailed int
-	Errors        []string
+	// ProgramsExpired counts programs whose dates passed since the last run.
+	ProgramsExpired int
+	// StillDue counts companies that were due but did not fit in this run;
+	// when it stays above zero, runs are too small or too infrequent.
+	StillDue int
+	Errors   []string
 }
 
 // RunOnce processes the companies that are due now. It is meant to be run
@@ -102,12 +107,17 @@ type CrawlReport struct {
 // never by a timer inside the harness: with more than one harness instance
 // that would crawl everything several times over.
 func (c *Crawler) RunOnce(ctx context.Context) (CrawlReport, error) {
-	due, err := c.store.CompaniesDue(ctx, c.opts.Now(), c.opts.CompaniesPerRun)
+	start := c.opts.Now()
+	expired, err := c.store.ExpirePrograms(ctx, start)
+	if err != nil {
+		return CrawlReport{}, err
+	}
+	due, err := c.store.CompaniesDue(ctx, start, c.opts.CompaniesPerRun)
 	if err != nil {
 		return CrawlReport{}, err
 	}
 	var mu sync.Mutex
-	report := CrawlReport{Companies: len(due)}
+	report := CrawlReport{Companies: len(due), ProgramsExpired: expired}
 	jobs := make(chan Company)
 	var wg sync.WaitGroup
 	for w := 0; w < c.opts.Workers; w++ {
@@ -135,6 +145,15 @@ func (c *Crawler) RunOnce(ctx context.Context) (CrawlReport, error) {
 	wg.Wait()
 	if err := ctx.Err(); err != nil {
 		return report, err
+	}
+	// Due as of the start of the run: companies crawled just now are
+	// scheduled into the future and do not count.
+	if report.StillDue, err = c.store.CountDue(ctx, start); err != nil {
+		return report, err
+	}
+	if report.StillDue > 0 {
+		c.log.WarnContext(ctx, "csr crawl left due companies for the next run; raise CSR_CRAWL_COMPANIES_PER_RUN or run more often",
+			"still_due", report.StillDue, "companies_per_run", c.opts.CompaniesPerRun)
 	}
 	return report, nil
 }
@@ -228,7 +247,7 @@ func (c *Crawler) crawlCompany(ctx context.Context, company Company) (CrawlRepor
 		case err != nil:
 			return report, fmt.Errorf("extract: %w", err)
 		case ex.HasCSRContent:
-			if err := c.store.SaveExtraction(ctx, company.ID, ex.Evidence, ex.Profile); err != nil {
+			if err := c.store.SaveExtraction(ctx, company.ID, ex); err != nil {
 				return report, err
 			}
 			report.Extracted++

@@ -13,7 +13,7 @@ institution_profile:
   min_confidence: 0.6
 `
 
-func loadProfile(t *testing.T) InstitutionProfile {
+func testInstitution(t *testing.T) InstitutionProfile {
 	t.Helper()
 	ip, err := LoadInstitutionProfile(strings.NewReader(profileYAML))
 	if err != nil {
@@ -31,7 +31,7 @@ func claimsOf(values ...string) []Claim {
 }
 
 func TestLoadInstitutionProfile(t *testing.T) {
-	ip := loadProfile(t)
+	ip := testInstitution(t)
 	if len(ip.FocusAreas) != 3 || ip.MinConfidence != 0.6 || ip.Regions[0] != "Jawa Barat" {
 		t.Fatalf("unexpected profile: %+v", ip)
 	}
@@ -47,7 +47,7 @@ func TestLoadInstitutionProfile(t *testing.T) {
 }
 
 func TestScore_StrongMatchIsExplained(t *testing.T) {
-	ip := loadProfile(t)
+	ip := testInstitution(t)
 	p := &Profile{
 		FocusAreas:      claimsOf("Pendidikan anak", "UMKM binaan"),
 		Regions:         claimsOf("Kabupaten Bandung, Jabar"),
@@ -73,7 +73,7 @@ func TestScore_StrongMatchIsExplained(t *testing.T) {
 }
 
 func TestScore_RegionEvidenceBeatsSeedLabel(t *testing.T) {
-	ip := loadProfile(t)
+	ip := testInstitution(t)
 	nationwideProfile := &Profile{FocusAreas: claimsOf("kesehatan"), Regions: claimsOf("Seluruh Indonesia"), ModelConfidence: 0.9}
 	seedOnly := &Profile{FocusAreas: claimsOf("kesehatan"), ModelConfidence: 0.9}
 
@@ -88,7 +88,7 @@ func TestScore_RegionEvidenceBeatsSeedLabel(t *testing.T) {
 }
 
 func TestScore_NoMatchLowConfidenceAndMissingProfile(t *testing.T) {
-	ip := loadProfile(t)
+	ip := testInstitution(t)
 	m := ip.Score(Company{Region: "Papua"}, &Profile{FocusAreas: claimsOf("olahraga"), ModelConfidence: 0.3})
 	if m.Score != 0 || !m.LowConfidence || len(m.Reasons) != 2 {
 		t.Fatalf("unexpected match: %+v", m)

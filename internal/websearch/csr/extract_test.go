@@ -3,8 +3,11 @@ package csr
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/HumanInitiative/agent-harness-go/internal/websearch"
 )
 
 type scriptedExtractor struct {
@@ -224,12 +227,130 @@ func TestExtract_SavesThroughStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveExtraction(context.Background(), id, ex.Evidence, ex.Profile); err != nil {
+	if err := s.SaveExtraction(context.Background(), id, ex); err != nil {
 		t.Fatalf("a verified extraction must be storable as-is: %v", err)
 	}
 	p, _ := s.Profile(context.Background(), id)
 	ev, _ := s.Evidence(context.Background(), p.ProposalChannel.EvidenceIDs)
 	if len(ev) != 1 || !strings.Contains(ev[0].Excerpt, "tjsl@contohenergi.co.id") {
 		t.Fatalf("stored claim does not resolve to its excerpt: %+v", ev)
+	}
+}
+
+func TestExtract_ProgramsNeedEvidenceAndDatesNeedTheirYearInIt(t *testing.T) {
+	sources := []SourcePage{{
+		URL: "https://contohenergi.co.id/tjsl", Title: "Program TJSL", Kind: KindCSRProgram, FetchedAt: t0,
+		Content: "Beasiswa Prestasi 2023 telah menjangkau 200 siswa.\n\n" +
+			"Pendaftaran Beasiswa Prestasi 2026 dibuka hingga 30 November 2026 untuk siswa di Banten.\n\n" +
+			"Program Desa Sejahtera mendampingi UMKM di Jawa Barat.",
+	}}
+	reply := `{
+	  "is_csr_content": true, "focus_areas": [], "regions": [], "program_types": [], "known_partners": [],
+	  "programs": [
+	    {"name": "Beasiswa Prestasi 2023", "period_start": "2023", "period_end": "2023", "evidence": [0]},
+	    {"name": "Beasiswa Prestasi 2026", "description": "Beasiswa untuk siswa di Banten.", "regions": ["Banten"],
+	     "period_start": "2026", "proposal_deadline": "2026-11-30", "evidence": [1], "date_evidence": [1]},
+	    {"name": "Desa Sejahtera", "focus_areas": ["pemberdayaan ekonomi"], "period_end": "2027-12", "evidence": [2]},
+	    {"name": "Program Rahasia", "evidence": [3]},
+	    {"name": "Beasiswa Prestasi 2026", "evidence": [1]}
+	  ],
+	  "evidence": [
+	    {"url": "https://contohenergi.co.id/tjsl", "excerpt": "Beasiswa Prestasi 2023 telah menjangkau 200 siswa."},
+	    {"url": "https://contohenergi.co.id/tjsl", "excerpt": "Pendaftaran Beasiswa Prestasi 2026 dibuka hingga 30 November 2026"},
+	    {"url": "https://contohenergi.co.id/tjsl", "excerpt": "Program Desa Sejahtera mendampingi UMKM di Jawa Barat."},
+	    {"url": "https://contohenergi.co.id/tjsl", "excerpt": "Program Rahasia untuk pejabat daerah."}
+	  ],
+	  "confidence": 0.9
+	}`
+	pe, fake := newExtractor(reply)
+	ex, err := pe.Extract(context.Background(), extractCompany, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fake.instructions[0], "separate entry") {
+		t.Fatal("the instruction must ask for one entry per program per period")
+	}
+	var names []string
+	byName := map[string]Program{}
+	for _, p := range ex.Programs {
+		names = append(names, p.Name)
+		byName[p.Name] = p
+	}
+	if got := strings.Join(names, ","); got != "Beasiswa Prestasi 2023,Beasiswa Prestasi 2026,Desa Sejahtera" {
+		t.Fatalf("programs = %s (unverified and duplicate programs must be dropped)", got)
+	}
+	if p := byName["Beasiswa Prestasi 2026"]; p.ProposalDeadline != "2026-11-30" || p.PeriodStart != "2026" || p.Regions[0] != "Banten" {
+		t.Fatalf("verified dates must be kept: %+v", p)
+	}
+	// "2027-12" is not in Desa Sejahtera's excerpt: the model invented it.
+	if p := byName["Desa Sejahtera"]; p.PeriodEnd != "" || len(p.EvidenceIDs) != 1 {
+		t.Fatalf("an unsupported date must be dropped, the program kept: %+v", p)
+	}
+	dropped := strings.Join(ex.Dropped, "\n")
+	for _, want := range []string{`"Program Rahasia": no verified evidence`, "period_end 2027-12 is not stated"} {
+		if !strings.Contains(dropped, want) {
+			t.Errorf("Dropped should mention %q:\n%s", want, dropped)
+		}
+	}
+	if len(ex.ReadURLs) != 1 || ex.ReadURLs[0] != "https://contohenergi.co.id/tjsl" {
+		t.Fatalf("ReadURLs = %v", ex.ReadURLs)
+	}
+}
+
+func TestExtract_LongReportShowsOnlySelectedPagesAndCitesThePage(t *testing.T) {
+	filler := strings.Repeat("Laporan keuangan konsolidasian dan neraca perusahaan untuk tahun buku. ", 10)
+	program := "Program TJSL Beasiswa Pendidikan: penyaluran bantuan beasiswa kepada 1.200 penerima manfaat " +
+		"di Jawa Barat senilai Rp 4,5 miliar pada 2025, bersama mitra binaan dan yayasan pendidikan setempat. " +
+		"Pemberdayaan masyarakat desa melalui pelatihan UMKM juga menjadi bagian dari program CSR kami."
+	pages := []string{"Daftar isi", filler, filler, program, filler}
+	report := SourcePage{
+		URL: "https://contohenergi.co.id/laporan-2025.pdf", Title: "Laporan Keberlanjutan 2025", Kind: KindReport,
+		Content: strings.Join(pages, websearch.PageBreak), FetchedAt: t0,
+	}
+	reply := `{"is_csr_content": true, "focus_areas": [{"value": "pendidikan", "evidence": [0]}, {"value": "keuangan", "evidence": [1]}],
+	  "regions": [], "program_types": [], "known_partners": [], "programs": [],
+	  "evidence": [
+	    {"url": "https://contohenergi.co.id/laporan-2025.pdf", "excerpt": "penyaluran bantuan beasiswa kepada 1.200 penerima manfaat di Jawa Barat"},
+	    {"url": "https://contohenergi.co.id/laporan-2025.pdf", "excerpt": "Laporan keuangan konsolidasian dan neraca perusahaan"}
+	  ], "confidence": 0.7}`
+	pe, fake := newExtractor(reply)
+	ex, err := pe.Extract(context.Background(), extractCompany, []SourcePage{report})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := fake.contents[0]
+	if !strings.Contains(content, "[Halaman 4]") || strings.Contains(content, "neraca") {
+		t.Fatalf("only the program page should be shown:\n%s", content)
+	}
+	// The financial-statement excerpt is real text from the PDF, but from a
+	// page the model was never shown: it cannot have been read there.
+	if len(ex.Evidence) != 1 || ex.Evidence[0].URL != report.URL+"#page=4" {
+		t.Fatalf("evidence must link to its page: %+v", ex.Evidence)
+	}
+	if got := strings.Join(claimValues(ex.Profile.FocusAreas), ","); got != "pendidikan" {
+		t.Fatalf("focus = %s", got)
+	}
+
+	// A report without any CSR page is skipped, not sent.
+	empty := report
+	empty.Content = strings.Join([]string{filler, filler}, websearch.PageBreak)
+	if _, err := pe.Extract(context.Background(), extractCompany, []SourcePage{empty}); err == nil {
+		t.Fatal("a report with no CSR pages leaves nothing to extract")
+	}
+}
+
+func TestSelectPages_PrefersProgramPagesWithinBudget(t *testing.T) {
+	program := func(n int) string {
+		return strings.Repeat("Program TJSL beasiswa untuk penerima manfaat, pemberdayaan UMKM, bantuan kesehatan. ", 8) + fmt.Sprint(n)
+	}
+	toc := "Daftar isi " + strings.Repeat("Program TJSL beasiswa . . . 12 ", 20)
+	doc := strings.Join([]string{toc, program(2), "foto", program(4), strings.Repeat("Neraca dan laporan keuangan. ", 30)}, websearch.PageBreak)
+
+	got := SelectPages(doc, 10_000)
+	if len(got) != 2 || got[0].Number != 2 || got[1].Number != 4 {
+		t.Fatalf("expected pages 2 and 4 in page order, got %+v", got)
+	}
+	if one := SelectPages(doc, websearch.EstimateTokens(program(2))+5); len(one) != 1 {
+		t.Fatalf("budget must be respected, got %d pages", len(one))
 	}
 }

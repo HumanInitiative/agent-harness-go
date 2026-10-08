@@ -10,6 +10,7 @@ package csr
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/HumanInitiative/agent-harness-go/internal/websearch"
@@ -165,6 +166,117 @@ type Profile struct {
 	Notes           string
 	ExtractedAt     time.Time
 	ModelConfidence float64
+}
+
+// Program lifecycle. Programs are never deleted: history stays for audit,
+// and answers show active programs unless asked otherwise.
+const (
+	// ProgramActive: seen in the latest extraction of its pages and not
+	// past its dates.
+	ProgramActive = "active"
+	// ProgramExpired: its end date or proposal deadline has passed. A date
+	// rule; no model involved.
+	ProgramExpired = "expired"
+	// ProgramStale: missing from one re-extraction of its pages.
+	ProgramStale = "stale"
+	// ProgramInactive: missing from two consecutive re-extractions.
+	ProgramInactive = "inactive"
+)
+
+// Program is one CSR program or initiative a company runs or funds. The
+// same program in different years ("Beasiswa 2023", "Beasiswa 2026") is
+// two programs, each with its own dates and evidence.
+type Program struct {
+	ID          int64
+	CompanyID   int64
+	Name        string
+	Description string
+	// FocusAreas, Regions and ProgramTypes are covered by the program's
+	// evidence rather than cited one by one.
+	FocusAreas   []string
+	Regions      []string
+	ProgramTypes []string
+	// Dates are as precise as the pages state them, and each was checked
+	// against a cited excerpt containing its year.
+	PeriodStart      PartialDate
+	PeriodEnd        PartialDate
+	ProposalDeadline PartialDate
+	Status           string
+	// Misses counts consecutive re-extractions of the program's pages that
+	// no longer mentioned it.
+	Misses      int
+	EvidenceIDs []int64
+	// SourceURLs are the canonical URLs of the pages the program was read
+	// from; only re-reading all of them can count as a miss.
+	SourceURLs  []string
+	FirstSeenAt time.Time
+	LastSeenAt  time.Time
+}
+
+// EffectiveStatus is the program's status at now: a program whose dates
+// passed since it was stored is expired even before the next crawl.
+func (p Program) EffectiveStatus(now time.Time) string {
+	if p.ended(now) {
+		return ProgramExpired
+	}
+	return p.Status
+}
+
+// ended reports whether the program's end date or proposal deadline has
+// passed. A date stated only as a year or month lasts until its end.
+func (p Program) ended(now time.Time) bool {
+	today := now.UTC().Format("2006-01-02")
+	for _, d := range []PartialDate{p.PeriodEnd, p.ProposalDeadline} {
+		if d != "" && d.LastDay() < today {
+			return true
+		}
+	}
+	return false
+}
+
+// PartialDate is a date only as precise as its source: "2025", "2025-06"
+// or "2025-06-30".
+type PartialDate string
+
+// ParsePartialDate accepts YYYY, YYYY-MM or YYYY-MM-DD with a plausible
+// year, and returns false for anything else.
+func ParsePartialDate(s string) (PartialDate, bool) {
+	s = strings.TrimSpace(s)
+	for _, layout := range []string{"2006", "2006-01", "2006-01-02"} {
+		if len(s) != len(layout) {
+			continue
+		}
+		t, err := time.Parse(layout, s)
+		if err != nil || t.Year() < 2000 || t.Year() > 2100 {
+			return "", false
+		}
+		return PartialDate(s), true
+	}
+	return "", false
+}
+
+// Year returns the four-digit year.
+func (d PartialDate) Year() string {
+	if len(d) < 4 {
+		return ""
+	}
+	return string(d[:4])
+}
+
+// LastDay returns the last day the date covers, as YYYY-MM-DD: "2025" ends
+// on 2025-12-31 and "2025-02" on 2025-02-28.
+func (d PartialDate) LastDay() string {
+	switch len(d) {
+	case 4:
+		return string(d) + "-12-31"
+	case 7:
+		t, err := time.Parse("2006-01", string(d))
+		if err != nil {
+			return ""
+		}
+		return t.AddDate(0, 1, -1).Format("2006-01-02")
+	}
+	return string(d)
 }
 
 // Fetcher downloads pages; satisfied by *websearch.Fetcher. For automated

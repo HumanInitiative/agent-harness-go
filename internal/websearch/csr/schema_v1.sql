@@ -1,4 +1,4 @@
--- Schema version 1. Applied once; later changes go in new migrations.
+-- Schema version 1. Never edit an applied migration: add schema_vN.sql.
 
 CREATE TABLE companies (
   id              INTEGER PRIMARY KEY,

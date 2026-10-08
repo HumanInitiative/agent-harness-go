@@ -84,7 +84,7 @@ func TestAcceptance_SeedToProspectsWithEvidence(t *testing.T) {
 		t.Fatalf("unexpected report: %+v", report)
 	}
 
-	ip := loadProfile(t)
+	ip := testInstitution(t)
 	prospects, err := FindProspects(ctx, f.store, ip, ProspectFilter{Focus: "pendidikan", Region: "Jawa Barat"})
 	if err != nil {
 		t.Fatal(err)
@@ -289,7 +289,7 @@ func TestCheckCompany_FindsByNameVariants(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	mustInsert(t, s, Company{Name: "PT Bank Rakyat Indonesia (Persero) Tbk"})
-	ip := loadProfile(t)
+	ip := testInstitution(t)
 
 	for _, q := range []string{"bank rakyat indonesia", "PT BANK RAKYAT INDONESIA TBK", "rakyat"} {
 		got, err := CheckCompany(ctx, s, ip, q)

@@ -13,8 +13,15 @@ import (
 	_ "modernc.org/sqlite" // pure-Go SQLite driver with FTS5
 )
 
-//go:embed schema.sql
+//go:embed schema_v1.sql
 var schemaV1 string
+
+//go:embed schema_v2.sql
+var schemaV2 string
+
+// migrations[i] upgrades the schema from version i to i+1. Applied
+// migrations are never edited; a change is a new file.
+var migrations = []string{schemaV1, schemaV2}
 
 // ErrNotFound means the requested record does not exist.
 var ErrNotFound = errors.New("csr: not found")
@@ -62,21 +69,41 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("csr: read schema version: %w", err)
 	}
-	if version >= 1 {
-		return nil
+	if version > len(migrations) {
+		return fmt.Errorf("csr: database schema version %d is newer than this program (%d); upgrade the program", version, len(migrations))
 	}
+	for v := version; v < len(migrations); v++ {
+		// Each step commits on its own together with its version number,
+		// so an interrupted upgrade resumes where it stopped.
+		if err := s.applyMigration(ctx, v+1, migrations[v]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) applyMigration(ctx context.Context, version int, ddl string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, schemaV1); err != nil {
-		return fmt.Errorf("csr: apply schema v1: %w", err)
+	if _, err := tx.ExecContext(ctx, ddl); err != nil {
+		return fmt.Errorf("csr: apply schema v%d: %w", version, err)
 	}
-	if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// queryer is what *sql.DB and *sql.Tx have in common, so reads can run
+// inside a transaction (the store has a single connection: reading through
+// s.db while a transaction is open would wait forever).
+type queryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
 // --- time helpers: stored as RFC 3339 text in UTC -------------------------
@@ -215,6 +242,14 @@ func (s *Store) CompaniesDue(ctx context.Context, now time.Time, limit int) ([]C
 	return s.queryCompanies(ctx, `SELECT `+companyColumns+` FROM companies
 		WHERE status != 'excluded' AND (next_crawl_at IS NULL OR next_crawl_at <= ?)
 		ORDER BY next_crawl_at IS NOT NULL, next_crawl_at, id LIMIT ?`, ts(now), limit)
+}
+
+// CountDue counts companies whose next crawl is due at now.
+func (s *Store) CountDue(ctx context.Context, now time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM companies
+		WHERE status != 'excluded' AND (next_crawl_at IS NULL OR next_crawl_at <= ?)`, ts(now)).Scan(&n)
+	return n, err
 }
 
 // ListCompanies returns companies, optionally filtered by status.
@@ -393,22 +428,28 @@ func (s *Store) DomainAccess(ctx context.Context, domain string) (DomainAccess, 
 
 // --- evidence and profiles ------------------------------------------------------
 
-// SaveExtraction atomically replaces a company's profile: it stores the
-// evidence (reusing identical rows), rewrites every claim's evidence
-// references into evidence row IDs, and saves the profile. Either
+// SaveExtraction atomically stores what one extraction found: the
+// evidence (reusing identical rows), the profile and the programs. Either
 // everything is written or nothing is.
 //
-// In the profile passed in, Claim.EvidenceIDs are indexes into evidence
-// (not yet row IDs); every claim must reference at least one.
-func (s *Store) SaveExtraction(ctx context.Context, companyID int64, evidence []Evidence, profile Profile) error {
+// The extraction only covers the pages in ex.ReadURLs. Profile claims and
+// programs known from other pages are kept; those from re-read pages are
+// replaced, and programs the re-read pages no longer mention move along
+// their lifecycle (stale, then inactive) instead of being deleted.
+//
+// In ex, Claim.EvidenceIDs and Program.EvidenceIDs are indexes into
+// ex.Evidence (not yet row IDs); every claim and program must reference at
+// least one.
+func (s *Store) SaveExtraction(ctx context.Context, companyID int64, ex Extraction) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	now := s.now()
 
-	ids := make([]int64, len(evidence))
-	for i, e := range evidence {
+	ids := make([]int64, len(ex.Evidence))
+	for i, e := range ex.Evidence {
 		_, err := tx.ExecContext(ctx, `INSERT INTO evidence (company_id, url, title, excerpt, kind, fetched_at, published_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (company_id, url, excerpt) DO NOTHING`,
 			companyID, e.URL, e.Title, e.Excerpt, string(e.Kind), ts(e.FetchedAt), ts(e.PublishedAt))
@@ -420,79 +461,171 @@ func (s *Store) SaveExtraction(ctx context.Context, companyID int64, evidence []
 			return err
 		}
 	}
-
-	remap := func(claims []Claim) ([]byte, error) {
-		out := make([]Claim, len(claims))
-		for i, c := range claims {
-			out[i] = Claim{Value: c.Value}
-			if len(c.EvidenceIDs) == 0 {
-				return nil, fmt.Errorf("csr: claim %q has no evidence", c.Value)
+	rowIDs := func(what string, indexes []int64) ([]int64, error) {
+		if len(indexes) == 0 {
+			return nil, fmt.Errorf("csr: %s has no evidence", what)
+		}
+		out := make([]int64, 0, len(indexes))
+		for _, idx := range indexes {
+			if idx < 0 || int(idx) >= len(ids) {
+				return nil, fmt.Errorf("csr: %s references evidence %d of %d", what, idx, len(ids))
 			}
-			for _, idx := range c.EvidenceIDs {
-				if idx < 0 || int(idx) >= len(ids) {
-					return nil, fmt.Errorf("csr: claim %q references evidence %d of %d", c.Value, idx, len(ids))
-				}
-				out[i].EvidenceIDs = append(out[i].EvidenceIDs, ids[idx])
+			out = append(out, ids[idx])
+		}
+		return out, nil
+	}
+
+	read := map[string]bool{}
+	for _, u := range ex.ReadURLs {
+		read[CanonicalURL(u)] = true
+	}
+	urls, err := evidenceURLs(ctx, tx, companyID)
+	if err != nil {
+		return err
+	}
+	// fromReadPages reports whether a stored claim rests on a page that was
+	// just re-read, in which case the new extraction supersedes it.
+	fromReadPages := func(c Claim) bool {
+		for _, id := range c.EvidenceIDs {
+			if read[CanonicalURL(urls[id])] {
+				return true
 			}
 		}
-		return json.Marshal(out)
+		return false
 	}
-	single := func(c *Claim) (any, error) {
-		if c == nil {
+
+	old, err := loadProfile(ctx, tx, companyID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	merge := func(field string, fresh, previous []Claim) (string, error) {
+		out := make([]Claim, 0, len(fresh))
+		seen := map[string]bool{}
+		for _, c := range fresh {
+			rows, err := rowIDs(fmt.Sprintf("%s claim %q", field, c.Value), c.EvidenceIDs)
+			if err != nil {
+				return "", err
+			}
+			seen[strings.ToLower(c.Value)] = true
+			out = append(out, Claim{Value: c.Value, EvidenceIDs: rows})
+		}
+		for _, c := range previous {
+			if !seen[strings.ToLower(c.Value)] && !fromReadPages(c) {
+				out = append(out, c)
+			}
+		}
+		b, err := json.Marshal(out)
+		return string(b), err
+	}
+	single := func(field string, fresh, previous *Claim) (any, error) {
+		var c *Claim
+		switch {
+		case fresh != nil:
+			rows, err := rowIDs(field, fresh.EvidenceIDs)
+			if err != nil {
+				return nil, err
+			}
+			c = &Claim{Value: fresh.Value, EvidenceIDs: rows}
+		case previous != nil && !fromReadPages(*previous):
+			c = previous
+		default:
 			return nil, nil
 		}
-		b, err := remap([]Claim{*c})
-		if err != nil {
-			return nil, err
-		}
-		return string(b[1 : len(b)-1]), nil // the single object inside the array
+		b, err := json.Marshal(c)
+		return string(b), err
 	}
 
-	focus, err := remap(profile.FocusAreas)
+	p := ex.Profile
+	focus, err := merge("focus_areas", p.FocusAreas, old.FocusAreas)
 	if err != nil {
 		return err
 	}
-	regions, err := remap(profile.Regions)
+	regions, err := merge("regions", p.Regions, old.Regions)
 	if err != nil {
 		return err
 	}
-	types, err := remap(profile.ProgramTypes)
+	types, err := merge("program_types", p.ProgramTypes, old.ProgramTypes)
 	if err != nil {
 		return err
 	}
-	partners, err := remap(profile.KnownPartners)
+	partners, err := merge("known_partners", p.KnownPartners, old.KnownPartners)
 	if err != nil {
 		return err
 	}
-	channel, err := single(profile.ProposalChannel)
+	channel, err := single("proposal_channel", p.ProposalChannel, old.ProposalChannel)
 	if err != nil {
 		return err
 	}
-	seeking, err := single(profile.SeekingPartners)
+	seeking, err := single("seeking_partners", p.SeekingPartners, old.SeekingPartners)
 	if err != nil {
 		return err
 	}
-
 	_, err = tx.ExecContext(ctx, `INSERT INTO csr_profile (company_id, focus_areas, regions, program_types, known_partners,
 		proposal_channel, seeking_partners, notes, extracted_at, model_confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (company_id) DO UPDATE SET focus_areas = excluded.focus_areas, regions = excluded.regions,
 			program_types = excluded.program_types, known_partners = excluded.known_partners,
 			proposal_channel = excluded.proposal_channel, seeking_partners = excluded.seeking_partners,
 			notes = excluded.notes, extracted_at = excluded.extracted_at, model_confidence = excluded.model_confidence`,
-		companyID, string(focus), string(regions), string(types), string(partners), channel, seeking,
-		profile.Notes, ts(s.now()), profile.ModelConfidence)
+		companyID, focus, regions, types, partners, channel, seeking, p.Notes, ts(now), p.ModelConfidence)
 	if err != nil {
 		return fmt.Errorf("csr: save profile: %w", err)
+	}
+
+	for i := range ex.Programs {
+		prog := &ex.Programs[i]
+		indexes := prog.EvidenceIDs
+		if prog.EvidenceIDs, err = rowIDs(fmt.Sprintf("program %q", prog.Name), indexes); err != nil {
+			return err
+		}
+		prog.SourceURLs = nil
+		for _, idx := range indexes {
+			prog.SourceURLs = appendUnique(prog.SourceURLs, CanonicalURL(ex.Evidence[idx].URL))
+		}
+	}
+	if err := savePrograms(ctx, tx, companyID, ex.Programs, read, now); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
 
+// evidenceURLs maps a company's evidence row IDs to their URLs.
+func evidenceURLs(ctx context.Context, q queryer, companyID int64) (map[int64]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id, url FROM evidence WHERE company_id = ?`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var u string
+		if err := rows.Scan(&id, &u); err != nil {
+			return nil, err
+		}
+		out[id] = u
+	}
+	return out, rows.Err()
+}
+
+func appendUnique(list []string, v string) []string {
+	for _, x := range list {
+		if x == v {
+			return list
+		}
+	}
+	return append(list, v)
+}
+
 // Profile returns a company's profile.
 func (s *Store) Profile(ctx context.Context, companyID int64) (Profile, error) {
+	return loadProfile(ctx, s.db, companyID)
+}
+
+func loadProfile(ctx context.Context, q queryer, companyID int64) (Profile, error) {
 	var p Profile
 	var focus, regions, types, partners string
 	var channel, seeking, extracted sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT company_id, focus_areas, regions, program_types, known_partners,
+	err := q.QueryRowContext(ctx, `SELECT company_id, focus_areas, regions, program_types, known_partners,
 		proposal_channel, seeking_partners, notes, extracted_at, model_confidence FROM csr_profile WHERE company_id = ?`,
 		companyID).Scan(&p.CompanyID, &focus, &regions, &types, &partners, &channel, &seeking, &p.Notes, &extracted, &p.ModelConfidence)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -547,16 +680,30 @@ func (s *Store) Evidence(ctx context.Context, ids []int64) ([]Evidence, error) {
 }
 
 // SearchEvidence runs a full-text search over evidence titles and excerpts
-// and returns the matching company IDs, best match first.
+// and returns the matching evidence row IDs, best match first.
 func (s *Store) SearchEvidence(ctx context.Context, query string, limit int) ([]int64, error) {
-	match := ftsQuery(query)
-	if match == "" {
+	return s.searchFTS(ctx, query, `SELECT e.id FROM evidence_fts f JOIN evidence e ON e.id = f.rowid
+		WHERE evidence_fts MATCH ? ORDER BY f.rank LIMIT ?`, limit)
+}
+
+// searchFTS runs an FTS5 query built from free text: every meaningful word
+// must match; if that finds nothing, any word may.
+func (s *Store) searchFTS(ctx context.Context, text, query string, limit int) ([]int64, error) {
+	terms := ftsTerms(text)
+	if len(terms) == 0 {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT e.company_id FROM evidence_fts f JOIN evidence e ON e.id = f.rowid
-		WHERE evidence_fts MATCH ? GROUP BY e.company_id ORDER BY min(f.rank) LIMIT ?`, match, limit)
+	ids, err := s.queryIDs(ctx, query, strings.Join(terms, " AND "), limit)
+	if err != nil || len(ids) > 0 || len(terms) == 1 {
+		return ids, err
+	}
+	return s.queryIDs(ctx, query, strings.Join(terms, " OR "), limit)
+}
+
+func (s *Store) queryIDs(ctx context.Context, query string, args ...any) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("csr: search evidence: %w", err)
+		return nil, fmt.Errorf("csr: search: %w", err)
 	}
 	defer rows.Close()
 	var ids []int64
@@ -570,17 +717,24 @@ func (s *Store) SearchEvidence(ctx context.Context, query string, limit int) ([]
 	return ids, rows.Err()
 }
 
-// ftsQuery turns free text into a safe FTS5 query: every word becomes a
-// quoted prefix term joined with OR, so user input can never inject FTS
-// syntax.
-func ftsQuery(text string) string {
+// searchStopWords say nothing about which program is meant: every program
+// in the index is a CSR program.
+var searchStopWords = map[string]bool{
+	"program": true, "programs": true, "csr": true, "tjsl": true, "perusahaan": true, "yang": true,
+	"untuk": true, "dan": true, "dari": true, "dengan": true, "ada": true, "apa": true, "the": true,
+	"and": true, "for": true, "kegiatan": true,
+}
+
+// ftsTerms turns free text into safe FTS5 terms: each word becomes a quoted
+// prefix term, so user input can never inject FTS syntax.
+func ftsTerms(text string) []string {
 	var terms []string
 	for _, w := range strings.Fields(NormalizeName(text)) {
-		if len(w) >= 3 {
+		if len(w) >= 3 && !searchStopWords[w] {
 			terms = append(terms, `"`+w+`"*`)
 		}
 	}
-	return strings.Join(terms, " OR ")
+	return terms
 }
 
 func truncateText(s string, n int) string {

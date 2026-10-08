@@ -206,11 +206,12 @@ func TestStore_SaveExtractionAndFTS(t *testing.T) {
 		SeekingPartners: &seeking,
 		ModelConfidence: 0.75,
 	}
-	if err := s.SaveExtraction(ctx, id, evidence, profile); err != nil {
+	ex := Extraction{Evidence: evidence, Profile: profile, ReadURLs: []string{"https://contoh.co.id/csr"}}
+	if err := s.SaveExtraction(ctx, id, ex); err != nil {
 		t.Fatalf("SaveExtraction: %v", err)
 	}
 	// Saving again reuses identical evidence rows instead of duplicating.
-	if err := s.SaveExtraction(ctx, id, evidence, profile); err != nil {
+	if err := s.SaveExtraction(ctx, id, ex); err != nil {
 		t.Fatal(err)
 	}
 
@@ -233,7 +234,7 @@ func TestStore_SaveExtractionAndFTS(t *testing.T) {
 	}
 
 	ids, err := s.SearchEvidence(ctx, "beasiswa", 10)
-	if err != nil || len(ids) != 1 || ids[0] != id {
+	if err != nil || len(ids) != 1 || ids[0] != got.FocusAreas[0].EvidenceIDs[0] {
 		t.Fatalf("FTS search: %v %v", ids, err)
 	}
 	if ids, _ := s.SearchEvidence(ctx, `beasiswa" OR evil NEAR(`, 10); len(ids) != 1 {
@@ -254,7 +255,7 @@ func TestStore_SaveExtractionRejectsUnsupportedClaimsAtomically(t *testing.T) {
 		"no evidence":        {FocusAreas: []Claim{{Value: "pendidikan"}}},
 		"index out of range": {FocusAreas: []Claim{{Value: "pendidikan", EvidenceIDs: []int64{5}}}},
 	} {
-		if err := s.SaveExtraction(ctx, id, evidence, p); err == nil {
+		if err := s.SaveExtraction(ctx, id, Extraction{Evidence: evidence, Profile: p}); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
 	}
