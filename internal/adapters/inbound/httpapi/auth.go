@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/HumanInitiative/agent-harness-go/internal/platform/caller"
 	"github.com/HumanInitiative/agent-harness-go/internal/platform/logger"
 )
 
@@ -30,13 +31,18 @@ type apiKey struct {
 	id string
 }
 
-type apiKeyIDKey struct{}
-
 // apiKeyIDFrom returns the fingerprint of the key that authenticated the
 // request, or "" if the request did not pass through APIKeyAuth.
 func apiKeyIDFrom(ctx context.Context) string {
-	id, _ := ctx.Value(apiKeyIDKey{}).(string)
-	return id
+	return caller.KeyID(ctx)
+}
+
+// KeyFingerprint returns the identifier the harness uses for an API key in
+// logs and in CSR_REVIEWER_KEY_IDS: the first 12 hex digits of its SHA-256.
+// It identifies a key without revealing it.
+func KeyFingerprint(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // NewAPIKeyAuth builds the middleware. It refuses to build with no keys,
@@ -48,7 +54,7 @@ func NewAPIKeyAuth(keys []string) (*APIKeyAuth, error) {
 	a := &APIKeyAuth{keys: make([]apiKey, 0, len(keys))}
 	for _, k := range keys {
 		sum := sha256.Sum256([]byte(k))
-		a.keys = append(a.keys, apiKey{hash: sum, id: hex.EncodeToString(sum[:])[:12]})
+		a.keys = append(a.keys, apiKey{hash: sum, id: KeyFingerprint(k)})
 	}
 	return a, nil
 }
@@ -68,7 +74,7 @@ func (a *APIKeyAuth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), apiKeyIDKey{}, id)
+		ctx := caller.WithKeyID(r.Context(), id)
 		ctx = logger.WithAttrs(ctx, slog.String("api_key_id", id))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

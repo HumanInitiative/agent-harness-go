@@ -121,7 +121,11 @@ func run() error {
 		registeredTools = append(registeredTools,
 			tools.NewFindCSRProspectsTool(index, nil),
 			checkCompany,
+			tools.NewListNewCompaniesTool(store, nil),
 		)
+		if len(cfg.CSR.ReviewerKeyIDs) > 0 {
+			registeredTools = append(registeredTools, tools.NewSetCompanyStatusTool(store, cfg.CSR.ReviewerKeyIDs, log))
+		}
 	}
 
 	service, err := agent.NewService(model, conversations, registeredTools, agent.Config{

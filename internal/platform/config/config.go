@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -79,6 +80,10 @@ type CSRConfig struct {
 	OnDemandEnabled bool
 	OnDemandTimeout time.Duration
 	OnDemandPerHour int
+	// ReviewerKeyIDs are the fingerprints of the API keys allowed to change
+	// a company's review status through set_company_status (the tool is
+	// registered only when the list is not empty).
+	ReviewerKeyIDs []string
 }
 
 func loadCSR(r *reader) CSRConfig {
@@ -91,6 +96,7 @@ func loadCSR(r *reader) CSRConfig {
 		OnDemandEnabled:        r.boolean("CSR_ON_DEMAND_ENABLED", false),
 		OnDemandTimeout:        r.seconds("CSR_ON_DEMAND_TIMEOUT_SECONDS", 40),
 		OnDemandPerHour:        r.positiveInt("CSR_ON_DEMAND_PER_HOUR", 20),
+		ReviewerKeyIDs:         r.list("CSR_REVIEWER_KEY_IDS"),
 	}
 }
 
@@ -196,6 +202,9 @@ type WebConfig struct {
 	RespectRobotsOnFetch bool
 }
 
+// keyFingerprintPattern matches an API key fingerprint (httpapi.KeyFingerprint).
+var keyFingerprintPattern = regexp.MustCompile(`^[0-9a-f]{12}$`)
+
 var knownSearchProviders = map[string]bool{"searxng": true, "duckduckgo": true}
 
 // LogValue implements slog.LogValuer so a Config can be logged without ever
@@ -266,6 +275,12 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	cfg.CSR = loadCSR(&r)
 	if cfg.CSR.ToolsEnabled && (cfg.CSR.DBPath == "" || cfg.CSR.InstitutionProfilePath == "") {
 		r.fail("CSR_DB_PATH and CSR_INSTITUTION_PROFILE are required when CSR_TOOLS_ENABLED=true")
+	}
+	for _, id := range cfg.CSR.ReviewerKeyIDs {
+		if !keyFingerprintPattern.MatchString(id) {
+			r.fail(fmt.Sprintf("CSR_REVIEWER_KEY_IDS: %q is not a key fingerprint (12 lowercase hex digits, "+
+				"as logged in api_key_id; never put the key itself here)", id))
+		}
 	}
 	if cfg.CSR.OnDemandEnabled {
 		if !cfg.CSR.ToolsEnabled || !cfg.Web.Enabled {

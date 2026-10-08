@@ -217,6 +217,17 @@ func TestLoadFrom_OnDemandNeedsWebToolsAndAShortTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_ReviewerKeyIDsMustBeFingerprints(t *testing.T) {
+	cfg, err := config.LoadFrom(env(merge(requiredOnly(), "CSR_REVIEWER_KEY_IDS", "0123456789ab, a1b2c3d4e5f6")))
+	if err != nil || len(cfg.CSR.ReviewerKeyIDs) != 2 {
+		t.Fatalf("got %v, %v", cfg.CSR.ReviewerKeyIDs, err)
+	}
+	if _, err := config.LoadFrom(env(merge(requiredOnly(), "CSR_REVIEWER_KEY_IDS", validKey))); err == nil ||
+		!strings.Contains(err.Error(), "never put the key itself here") {
+		t.Fatalf("a raw key must be refused: %v", err)
+	}
+}
+
 func TestLoadCrawlerFrom_NeedsNoAPIKeysAndForcesWebValidation(t *testing.T) {
 	cfg, err := config.LoadCrawlerFrom(env(map[string]string{}))
 	if err != nil {
