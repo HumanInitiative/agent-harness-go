@@ -85,7 +85,8 @@ func TestAcceptance_SeedToProspectsWithEvidence(t *testing.T) {
 	}
 
 	ip := testInstitution(t)
-	prospects, err := FindProspects(ctx, f.store, ip, ProspectFilter{Focus: "pendidikan", Region: "Jawa Barat"})
+	index := NewIndex(f.store, ip, IndexOptions{Now: f.clock.now})
+	prospects, err := index.FindProspects(ctx, ProspectFilter{Focus: "pendidikan", Region: "Jawa Barat"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,15 +290,15 @@ func TestCheckCompany_FindsByNameVariants(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	mustInsert(t, s, Company{Name: "PT Bank Rakyat Indonesia (Persero) Tbk"})
-	ip := testInstitution(t)
+	index := NewIndex(s, testInstitution(t), IndexOptions{})
 
 	for _, q := range []string{"bank rakyat indonesia", "PT BANK RAKYAT INDONESIA TBK", "rakyat"} {
-		got, err := CheckCompany(ctx, s, ip, q)
+		got, err := index.CheckCompany(ctx, q, false)
 		if err != nil || len(got) != 1 || got[0].Profile != nil || !strings.Contains(got[0].Match.Reasons[0], "belum ada profil") {
 			t.Errorf("CheckCompany(%q) = %+v, %v", q, got, err)
 		}
 	}
-	if got, _ := CheckCompany(ctx, s, ip, "Perusahaan Tidak Ada"); len(got) != 0 {
+	if got, _ := index.CheckCompany(ctx, "Perusahaan Tidak Ada", false); len(got) != 0 {
 		t.Fatalf("unknown company should return nothing: %+v", got)
 	}
 }

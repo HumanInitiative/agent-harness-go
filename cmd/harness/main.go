@@ -108,7 +108,7 @@ func run() error {
 			return fmt.Errorf("initialize CSR tools: %w", err)
 		}
 		defer store.Close()
-		index := csr.NewIndex(store, profile)
+		index := csr.NewIndex(store, profile, csr.IndexOptions{StaleAfter: cfg.CSR.StaleAfter})
 		log.Info("CSR tools enabled", "db", cfg.CSR.DBPath)
 		registeredTools = append(registeredTools,
 			tools.NewFindCSRProspectsTool(index, nil),

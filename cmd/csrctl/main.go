@@ -253,7 +253,8 @@ func cmdShow(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, ar
 	if err != nil {
 		fmt.Fprintf(out, "\n(institution profile unavailable, fit not scored: %v)\n", err)
 	}
-	prospects, err := csr.CheckCompany(ctx, store, profile, c.Name)
+	index := csr.NewIndex(store, profile, csr.IndexOptions{StaleAfter: cfg.CSR.StaleAfter})
+	prospects, err := index.CheckCompany(ctx, c.Name, true)
 	if err != nil || len(prospects) == 0 {
 		return err
 	}
@@ -262,7 +263,11 @@ func cmdShow(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, ar
 		fmt.Fprintln(out, "\nno CSR profile extracted yet")
 		return nil
 	}
-	fmt.Fprintf(out, "\nprofile (model confidence %.2f, extracted %s):\n", p.Profile.ModelConfidence, p.Profile.ExtractedAt.Format("2006-01-02"))
+	fmt.Fprintf(out, "\nprofile (model confidence %.2f, extracted %s, source last checked %s):\n",
+		p.Profile.ModelConfidence, fmtTime(p.Freshness.ExtractedAt), fmtTime(p.Freshness.CheckedAt))
+	if p.Freshness.Stale {
+		fmt.Fprintf(out, "  STALE: %s\n", p.Freshness.Reason)
+	}
 	printClaims := func(label string, claims []csr.Claim) {
 		for _, cl := range claims {
 			fmt.Fprintf(out, "  %-16s %s %v\n", label, cl.Value, cl.EvidenceIDs)
@@ -278,6 +283,20 @@ func cmdShow(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, ar
 	if p.Profile.SeekingPartners != nil {
 		printClaims("seeking partners", []csr.Claim{*p.Profile.SeekingPartners})
 	}
+
+	if len(p.Programs) > 0 {
+		fmt.Fprintln(out, "\nprograms:")
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "  STATUS\tNAME\tPERIOD\tDEADLINE\tLAST SEEN\tEVIDENCE")
+		for _, prog := range p.Programs {
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%v\n", prog.Status, prog.Name,
+				period(prog.PeriodStart, prog.PeriodEnd), dash(string(prog.ProposalDeadline)), prog.LastSeenAt.UTC().Format("2006-01-02"), prog.EvidenceIDs)
+		}
+		if err := w.Flush(); err != nil {
+			return err
+		}
+	}
+
 	fmt.Fprintln(out, "\nevidence:")
 	ids := make([]int64, 0, len(p.Evidence))
 	for id := range p.Evidence {
@@ -286,13 +305,25 @@ func cmdShow(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, ar
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, id := range ids {
 		e := p.Evidence[id]
-		fmt.Fprintf(out, "  [%d] %s\n      %q\n", id, e.URL, e.Excerpt)
+		fmt.Fprintf(out, "  [%d] %s (fetched %s)\n      %q\n", id, e.URL, e.FetchedAt.UTC().Format("2006-01-02"), e.Excerpt)
 	}
 	fmt.Fprintf(out, "\nfit with institution: %d/100\n", p.Match.Score)
 	for _, r := range p.Match.Reasons {
 		fmt.Fprintln(out, "  -", r)
 	}
 	return nil
+}
+
+func period(start, end csr.PartialDate) string {
+	switch {
+	case start == "" && end == "":
+		return "-"
+	case start == end || end == "":
+		return string(start)
+	case start == "":
+		return "until " + string(end)
+	}
+	return string(start) + " to " + string(end)
 }
 
 func cmdRoute(ctx context.Context, store *csr.Store, args []string, out io.Writer) error {

@@ -211,6 +211,38 @@ func (ip InstitutionProfile) Score(c Company, p *Profile) Match {
 	return m
 }
 
+// scorePrograms adjusts a profile's score by the company's programs: an
+// active program in the institution's fields or regions is the strongest
+// sign of a current opportunity, and a company whose recorded programs
+// have all ended is a weaker prospect than its profile alone suggests.
+func (ip InstitutionProfile) scorePrograms(m *Match, active []Program, total int) {
+	focus := map[string]bool{}
+	for _, f := range append(append([]string{}, ip.FocusAreas...), ip.ProgramTypes...) {
+		focus[concept(f)] = true
+	}
+	var relevant []string
+	for _, p := range active {
+		fits := false
+		for _, v := range append(append([]string{}, p.FocusAreas...), p.ProgramTypes...) {
+			fits = fits || focus[concept(v)]
+		}
+		for _, r := range p.Regions {
+			fits = fits || anyRegionMatches(r, ip.Regions)
+		}
+		if fits {
+			relevant = append(relevant, p.Name)
+		}
+	}
+	switch {
+	case len(relevant) > 0:
+		m.Score = min(m.Score+10, 100)
+		m.Reasons = append(m.Reasons, "program aktif yang relevan: "+strings.Join(dedupe(relevant), ", "))
+	case total > 0 && len(active) == 0:
+		m.Score = max(m.Score-10, 0)
+		m.Reasons = append(m.Reasons, "semua program yang tercatat sudah berakhir atau tidak terlihat lagi di halaman sumber")
+	}
+}
+
 func anyRegionMatches(region string, wanted []string) bool {
 	for _, w := range wanted {
 		if regionMatches(region, w) {
