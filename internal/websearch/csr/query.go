@@ -244,7 +244,8 @@ func freshness(profile *Profile, routes []Page, now time.Time, staleAfter time.D
 			continue
 		}
 		reachable = true
-		if r.HTTPStatus == 200 && r.LastCheckedAt.After(f.CheckedAt) {
+		// 304: the server confirmed the page is unchanged.
+		if (r.HTTPStatus == 200 || r.HTTPStatus == 304) && r.LastCheckedAt.After(f.CheckedAt) {
 			f.CheckedAt = r.LastCheckedAt
 		}
 	}

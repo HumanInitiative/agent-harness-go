@@ -48,7 +48,9 @@ state, its last HTTP status and content hash, and when to check it again.
   (a site redesign).
 - **Rechecks by kind:** program pages weekly, foundation pages every two
   weeks, news every three days, reports every 90 days. Failures back off
-  1 → 2 → 4 … 30 days.
+  1 → 2 → 4 … 30 days. Rechecks are conditional requests, so a server
+  can confirm an unchanged page (304) without sending it; a 304 counts as
+  a successful check.
 - `gone` (404/410) and `blocked` (WAF, 403, robots.txt) routes are retried
   after 30 and 14 days respectively; a successful check makes them active
   again.
@@ -145,8 +147,12 @@ of the pipeline together, so the work is split:
 4. **Judge fit** (rules, `Score`): the institution's fit is never asked of
    a model, so asking many questions costs nothing.
 
-Reports are rechecked every 90 days; an unchanged report (same content
-hash) is never sent to the model again. A report without any page that
+Reports are rechecked every 90 days as a conditional request (the
+`ETag` / `Last-Modified` of the version last read): an unchanged report is
+confirmed with a 304 and not downloaded again. Six of seven report
+servers checked on 2026-10-08 (MIND ID, BCA, Merdeka Gold, RAIN, Medco,
+Asuransi Astra) answer that way; for the others, an unchanged report
+(same content hash) is downloaded but never sent to the model again. A report without any page that
 looks like CSR content is skipped without a model call.
 
 ### Measured page selection (2026-10-08)

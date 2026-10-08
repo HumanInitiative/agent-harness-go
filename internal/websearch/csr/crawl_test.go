@@ -155,6 +155,57 @@ func TestCrawl_UnchangedContentIsNotReExtracted(t *testing.T) {
 	}
 }
 
+func TestCrawl_UnchangedReportIsConfirmedWithoutDownload(t *testing.T) {
+	f := newCrawlFixture(t, CrawlOptions{}, goodExtraction)
+	ctx := context.Background()
+	id := mustInsert(t, f.store, Company{Name: "PT Contoh Energi Tbk", Domain: "contohenergi.co.id"})
+	f.web.pages["https://contohenergi.co.id/"] = homepage(link("TJSL", "https://contohenergi.co.id/tjsl"))
+	page := csrPage()
+	page.ETag = `"v1"`
+	f.web.pages["https://contohenergi.co.id/tjsl"] = page
+
+	// First crawl: no profile yet, so the page is fetched in full and its
+	// validator is stored.
+	if _, err := f.crawler.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.web.notModified) != 0 {
+		t.Fatal("a page without a stored version must be fetched in full")
+	}
+	routes, _ := f.store.Pages(ctx, id)
+	if routes[0].ETag != `"v1"` {
+		t.Fatalf("validator not stored: %+v", routes[0])
+	}
+
+	// Recheck: the server confirms the version, nothing is downloaded or
+	// extracted, and the check counts as a successful confirmation.
+	f.clock.advance(8 * day)
+	r, err := f.crawler.RunOnce(ctx)
+	if err != nil || r.PagesNotModified != 1 || r.PagesChanged != 0 || f.extractor.calls != 1 {
+		t.Fatalf("expected a 304 recheck: %+v, %v, calls=%d", r, err, f.extractor.calls)
+	}
+	routes, _ = f.store.Pages(ctx, id)
+	if routes[0].HTTPStatus != 304 || !routes[0].LastCheckedAt.Equal(f.clock.now()) || routes[0].ContentHash == "" ||
+		!routes[0].NextCheckAt.After(f.clock.now()) {
+		t.Fatalf("a 304 must be recorded as a successful check keeping the hash: %+v", routes[0])
+	}
+	index := NewIndex(f.store, testInstitution(t), IndexOptions{Now: f.clock.now})
+	got, _ := index.CheckCompany(ctx, "Contoh Energi", false)
+	if !got[0].Freshness.CheckedAt.Equal(f.clock.now()) || got[0].Freshness.Stale {
+		t.Fatalf("a 304 confirms the data: %+v", got[0].Freshness)
+	}
+
+	// A new version (new ETag) is downloaded and extracted.
+	changed := csrPage()
+	changed.ETag = `"v2"`
+	changed.Content += "\n\nTahun ini program diperluas ke Jawa Tengah."
+	f.web.pages["https://contohenergi.co.id/tjsl"] = changed
+	f.clock.advance(8 * day)
+	if r, _ := f.crawler.RunOnce(ctx); r.PagesChanged != 1 || f.extractor.calls != 2 {
+		t.Fatalf("a changed page must be fetched and extracted: %+v calls=%d", r, f.extractor.calls)
+	}
+}
+
 func TestCrawl_GoneRouteTriggersRediscovery(t *testing.T) {
 	f := newCrawlFixture(t, CrawlOptions{SkipExtraction: true}, goodExtraction)
 	ctx := context.Background()

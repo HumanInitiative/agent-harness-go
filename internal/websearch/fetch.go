@@ -144,6 +144,22 @@ func productToken(userAgent string) string {
 
 // Fetch downloads rawURL and extracts its text. Results are cached by URL.
 func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (Page, error) {
+	return f.FetchIfModified(ctx, rawURL, Validators{})
+}
+
+// Validators identify the version of a page fetched before (see
+// Page.ETag and Page.LastModified).
+type Validators struct {
+	ETag         string
+	LastModified string
+}
+
+// FetchIfModified is Fetch as a conditional request: when the server
+// confirms the page is unchanged since the version v identifies, it
+// returns ErrNotModified without downloading the body. Recurring crawls
+// use it so an unchanged 100 MB report is not downloaded again. Servers
+// that ignore validators simply send the page.
+func (f *Fetcher) FetchIfModified(ctx context.Context, rawURL string, v Validators) (Page, error) {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return Page{}, fmt.Errorf("%w: %v", ErrInvalidURL, err)
@@ -174,8 +190,13 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (Page, error) {
 	}
 
 	start := f.opts.Now()
-	page, err := f.fetch(ctx, u)
+	page, err := f.fetch(ctx, u, v)
 	duration := f.opts.Now().Sub(start)
+	if errors.Is(err, ErrNotModified) {
+		f.opts.Metrics.Inc("fetch.not_modified")
+		f.log.InfoContext(ctx, "web fetch not modified", "url", key, "duration_ms", duration.Milliseconds())
+		return Page{}, err
+	}
 	if err != nil {
 		f.opts.Metrics.Inc("fetch.failure")
 		f.log.InfoContext(ctx, "web fetch failed", "url", key, "duration_ms", duration.Milliseconds(), "error", err)
@@ -190,7 +211,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (Page, error) {
 	return page, nil
 }
 
-func (f *Fetcher) fetch(ctx context.Context, u *url.URL) (Page, error) {
+func (f *Fetcher) fetch(ctx context.Context, u *url.URL, v Validators) (Page, error) {
 	if err := f.limiter.Wait(ctx, u.Hostname()); err != nil {
 		return Page{}, err
 	}
@@ -203,7 +224,7 @@ func (f *Fetcher) fetch(ctx context.Context, u *url.URL) (Page, error) {
 	})
 	defer deadline.Stop()
 
-	page, err := f.fetchWithin(reqCtx, u, func() {
+	page, err := f.fetchWithin(reqCtx, u, v, func() {
 		deadline.Reset(f.opts.PDFTimeout)
 	})
 	if err != nil && ctx.Err() == nil {
@@ -214,7 +235,7 @@ func (f *Fetcher) fetch(ctx context.Context, u *url.URL) (Page, error) {
 	return page, err
 }
 
-func (f *Fetcher) fetchWithin(ctx context.Context, u *url.URL, extendForPDF func()) (Page, error) {
+func (f *Fetcher) fetchWithin(ctx context.Context, u *url.URL, v Validators, extendForPDF func()) (Page, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return Page{}, fmt.Errorf("%w: %v", ErrInvalidURL, err)
@@ -222,12 +243,21 @@ func (f *Fetcher) fetchWithin(ctx context.Context, u *url.URL, extendForPDF func
 	req.Header.Set("User-Agent", f.opts.UserAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,application/pdf;q=0.8")
 	req.Header.Set("Accept-Language", "id,en;q=0.8")
+	if v.ETag != "" {
+		req.Header.Set("If-None-Match", v.ETag)
+	}
+	if v.LastModified != "" {
+		req.Header.Set("If-Modified-Since", v.LastModified)
+	}
 
 	resp, err := f.clientWithFreshCookies().Do(req)
 	if err != nil {
 		return Page{}, fmt.Errorf("websearch: fetch %s: %w", u, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotModified {
+		return Page{}, ErrNotModified
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
@@ -251,7 +281,10 @@ func (f *Fetcher) fetchWithin(ctx context.Context, u *url.URL, extendForPDF func
 	}
 
 	final := resp.Request.URL
-	page := Page{URL: u.String(), FinalURL: final.String(), Kind: kind, FetchedAt: f.opts.Now()}
+	page := Page{
+		URL: u.String(), FinalURL: final.String(), Kind: kind, FetchedAt: f.opts.Now(),
+		ETag: resp.Header.Get("ETag"), LastModified: resp.Header.Get("Last-Modified"),
+	}
 	if kind == "pdf" {
 		extendForPDF()
 		text, n, err := f.readPDF(ctx, body, resp.ContentLength)

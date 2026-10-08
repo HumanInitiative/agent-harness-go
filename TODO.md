@@ -17,10 +17,6 @@ Left open:
 - [ ] Run the first real extraction with programs (see "Run one real
       extraction" below) and review program names, dates and dropped
       claims, especially from report pages.
-- [ ] Conditional requests (`ETag` / `If-Modified-Since`) for reports, so
-      an unchanged 100 MB PDF is not downloaded again at its 90-day
-      recheck. Low priority: the content hash already prevents a second
-      model call.
 - [ ] Try the Kubernetes CronJob on a real cluster (written, not yet
       applied anywhere).
 

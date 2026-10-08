@@ -324,8 +324,8 @@ func withCrawlLock(ctx context.Context, store *csr.Store, log *slog.Logger, fn f
 }
 
 func printReport(out io.Writer, report csr.CrawlReport) {
-	fmt.Fprintf(out, "companies %d | resolved %d (routes found %d) | pages fetched %d, changed %d | extracted %d, failed %d | programs expired %d\n",
-		report.Companies, report.Resolved, report.RoutesFound, report.PagesFetched, report.PagesChanged,
+	fmt.Fprintf(out, "companies %d | resolved %d (routes found %d) | pages checked %d, changed %d, unchanged per server %d | extracted %d, failed %d | programs expired %d\n",
+		report.Companies, report.Resolved, report.RoutesFound, report.PagesFetched, report.PagesChanged, report.PagesNotModified,
 		report.Extracted, report.ExtractFailed, report.ProgramsExpired)
 	if report.StillDue > 0 {
 		fmt.Fprintf(out, "  %d companies are still due and wait for the next run (raise CSR_CRAWL_COMPANIES_PER_RUN if this persists)\n", report.StillDue)

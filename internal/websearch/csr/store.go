@@ -19,9 +19,12 @@ var schemaV1 string
 //go:embed schema_v2.sql
 var schemaV2 string
 
+//go:embed schema_v3.sql
+var schemaV3 string
+
 // migrations[i] upgrades the schema from version i to i+1. Applied
 // migrations are never edited; a change is a new file.
-var migrations = []string{schemaV1, schemaV2}
+var migrations = []string{schemaV1, schemaV2, schemaV3}
 
 // ErrNotFound means the requested record does not exist.
 var ErrNotFound = errors.New("csr: not found")
@@ -354,7 +357,8 @@ func (s *Store) UpsertPage(ctx context.Context, p Page) (int64, error) {
 // Pages returns a company's routes, best first.
 func (s *Store) Pages(ctx context.Context, companyID int64) ([]Page, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, company_id, url, kind, discovered_via, score, state,
-		coalesce(http_status, 0), coalesce(content_hash, ''), last_checked_at, next_check_at, failures
+		coalesce(http_status, 0), coalesce(content_hash, ''), last_checked_at, next_check_at, failures,
+		coalesce(etag, ''), coalesce(last_modified, '')
 		FROM company_pages WHERE company_id = ? ORDER BY state = 'pinned' DESC, score DESC, id`, companyID)
 	if err != nil {
 		return nil, err
@@ -366,7 +370,7 @@ func (s *Store) Pages(ctx context.Context, companyID int64) ([]Page, error) {
 		var kind string
 		var last, next sql.NullString
 		if err := rows.Scan(&p.ID, &p.CompanyID, &p.URL, &kind, &p.DiscoveredVia, &p.Score, &p.State,
-			&p.HTTPStatus, &p.ContentHash, &last, &next, &p.Failures); err != nil {
+			&p.HTTPStatus, &p.ContentHash, &last, &next, &p.Failures, &p.ETag, &p.LastModified); err != nil {
 			return nil, err
 		}
 		p.Kind, p.LastCheckedAt, p.NextCheckAt = PageKind(kind), parseTS(last), parseTS(next)
@@ -383,6 +387,14 @@ func (s *Store) RecordPageCheck(ctx context.Context, pageID int64, httpStatus in
 		content_hash = coalesce(nullif(?, ''), content_hash), failures = ?,
 		last_checked_at = ?, next_check_at = ?, updated_at = ? WHERE id = ?`,
 		httpStatus, state, contentHash, failures, now, ts(next), now, pageID)
+	return err
+}
+
+// SetPageValidators records the HTTP validators of the version of a route
+// just fetched, for the next conditional recheck. Empty values clear them.
+func (s *Store) SetPageValidators(ctx context.Context, pageID int64, etag, lastModified string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE company_pages SET etag = nullif(?, ''), last_modified = nullif(?, '') WHERE id = ?`,
+		etag, lastModified, pageID)
 	return err
 }
 

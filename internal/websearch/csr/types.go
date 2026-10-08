@@ -124,6 +124,10 @@ type Page struct {
 	LastCheckedAt time.Time
 	NextCheckAt   time.Time
 	Failures      int
+	// ETag and LastModified identify the version last fetched, for a
+	// conditional recheck.
+	ETag         string
+	LastModified string
 }
 
 // DomainAccess records how reachable a domain was at its last check.
@@ -283,6 +287,9 @@ func (d PartialDate) LastDay() string {
 // crawling it must enforce robots.txt.
 type Fetcher interface {
 	Fetch(ctx context.Context, rawURL string) (websearch.Page, error)
+	// FetchIfModified returns websearch.ErrNotModified when the server
+	// confirms the version v identifies is still current.
+	FetchIfModified(ctx context.Context, rawURL string, v websearch.Validators) (websearch.Page, error)
 	// Sitemaps returns the Sitemap: URLs from the robots.txt of rawURL's host.
 	Sitemaps(ctx context.Context, rawURL string) ([]string, error)
 }

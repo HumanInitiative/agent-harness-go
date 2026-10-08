@@ -18,13 +18,14 @@ import (
 // fakeWeb serves canned pages, errors, sitemaps and search results, and
 // records every fetch so tests can assert what was (not) requested.
 type fakeWeb struct {
-	mu       sync.Mutex
-	pages    map[string]websearch.Page
-	errs     map[string]error
-	sitemaps map[string][]string
-	search   map[string][]websearch.Result
-	fetched  []string
-	searched []string
+	mu          sync.Mutex
+	pages       map[string]websearch.Page
+	errs        map[string]error
+	sitemaps    map[string][]string
+	search      map[string][]websearch.Result
+	fetched     []string
+	notModified []string
+	searched    []string
 }
 
 func newFakeWeb() *fakeWeb {
@@ -48,6 +49,20 @@ func (f *fakeWeb) Fetch(_ context.Context, rawURL string) (websearch.Page, error
 		return p, nil
 	}
 	return websearch.Page{}, &websearch.StatusError{URL: rawURL, StatusCode: 404}
+}
+
+// FetchIfModified answers 304 when the stored page's ETag matches.
+func (f *fakeWeb) FetchIfModified(ctx context.Context, rawURL string, v websearch.Validators) (websearch.Page, error) {
+	f.mu.Lock()
+	p, ok := f.pages[rawURL]
+	f.mu.Unlock()
+	if ok && v.ETag != "" && v.ETag == p.ETag {
+		f.mu.Lock()
+		f.notModified = append(f.notModified, rawURL)
+		f.mu.Unlock()
+		return websearch.Page{}, websearch.ErrNotModified
+	}
+	return f.Fetch(ctx, rawURL)
 }
 
 func (f *fakeWeb) Sitemaps(_ context.Context, rawURL string) ([]string, error) {

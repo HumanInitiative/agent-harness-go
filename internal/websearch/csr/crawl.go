@@ -92,13 +92,16 @@ func NewCrawler(store *Store, resolver *Resolver, fetcher Fetcher, extractor *Pr
 // CrawlReport summarizes a run.
 type CrawlReport struct {
 	// Companies counts companies processed.
-	Companies     int
-	Resolved      int
-	RoutesFound   int
-	PagesFetched  int
-	PagesChanged  int
-	Extracted     int
-	ExtractFailed int
+	Companies    int
+	Resolved     int
+	RoutesFound  int
+	PagesFetched int
+	PagesChanged int
+	// PagesNotModified counts rechecks the server answered with 304: the
+	// page was confirmed unchanged without downloading it.
+	PagesNotModified int
+	Extracted        int
+	ExtractFailed    int
 	// ProgramsExpired counts programs whose dates passed since the last run.
 	ProgramsExpired int
 	// StillDue counts companies that were due but did not fit in this run;
@@ -176,6 +179,7 @@ func (r *CrawlReport) add(o CrawlReport) {
 	r.RoutesFound += o.RoutesFound
 	r.PagesFetched += o.PagesFetched
 	r.PagesChanged += o.PagesChanged
+	r.PagesNotModified += o.PagesNotModified
 	r.Extracted += o.Extracted
 	r.ExtractFailed += o.ExtractFailed
 }
@@ -233,7 +237,13 @@ func (c *Crawler) crawlCompany(ctx context.Context, company Company) (CrawlRepor
 		}
 		fetched++
 		report.PagesFetched++
-		src, isChanged, err := c.checkPage(ctx, p, now)
+		// Without a profile every page's content is needed, so nothing is
+		// fetched conditionally.
+		src, isChanged, err := c.checkPage(ctx, p, now, !needFullExtraction)
+		if errors.Is(err, websearch.ErrNotModified) {
+			report.PagesNotModified++
+			continue
+		}
 		if err != nil {
 			c.log.InfoContext(ctx, "csr route check failed", "company_id", company.ID, "url", p.URL, "error", err)
 			continue
@@ -290,8 +300,25 @@ func (c *Crawler) crawlCompany(ctx context.Context, company Company) (CrawlRepor
 
 // checkPage fetches one route and records the outcome. It returns the page
 // as an extraction source and whether its content changed since last time.
-func (c *Crawler) checkPage(ctx context.Context, p Page, now time.Time) (SourcePage, bool, error) {
-	page, err := c.fetcher.Fetch(ctx, p.URL)
+// With conditional set, a route fetched before is fetched only if the
+// server says it changed; otherwise websearch.ErrNotModified is returned
+// and the check is recorded as successful.
+func (c *Crawler) checkPage(ctx context.Context, p Page, now time.Time, conditional bool) (SourcePage, bool, error) {
+	interval := recheckAfter[p.Kind]
+	if interval == 0 {
+		interval = 7 * day
+	}
+	var validators websearch.Validators
+	if conditional && p.ContentHash != "" {
+		validators = websearch.Validators{ETag: p.ETag, LastModified: p.LastModified}
+	}
+	page, err := c.fetcher.FetchIfModified(ctx, p.URL, validators)
+	if errors.Is(err, websearch.ErrNotModified) {
+		if recErr := c.store.RecordPageCheck(ctx, p.ID, 304, PageActive, "", 0, now.Add(interval)); recErr != nil {
+			return SourcePage{}, false, recErr
+		}
+		return SourcePage{}, false, err
+	}
 	if err != nil {
 		state, failures, next, status := p.State, p.Failures+1, now.Add(backoff(p.Failures+1)), 0
 		var se *websearch.StatusError
@@ -315,11 +342,10 @@ func (c *Crawler) checkPage(ctx context.Context, p Page, now time.Time) (SourceP
 
 	sum := sha256.Sum256([]byte(page.Title + "\n" + page.Content))
 	hash := hex.EncodeToString(sum[:])
-	interval := recheckAfter[p.Kind]
-	if interval == 0 {
-		interval = 7 * day
-	}
 	if err := c.store.RecordPageCheck(ctx, p.ID, 200, PageActive, hash, 0, now.Add(interval)); err != nil {
+		return SourcePage{}, false, err
+	}
+	if err := c.store.SetPageValidators(ctx, p.ID, page.ETag, page.LastModified); err != nil {
 		return SourcePage{}, false, err
 	}
 	return SourcePage{URL: p.URL, Title: page.Title, Kind: p.Kind, Content: page.Content, FetchedAt: page.FetchedAt},

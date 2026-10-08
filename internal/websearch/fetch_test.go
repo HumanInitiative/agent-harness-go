@@ -345,6 +345,52 @@ func TestFetch_LargePDFIsStreamedWithItsOwnLimits(t *testing.T) {
 	}
 }
 
+func TestFetchIfModified_UnchangedPageIsNotDownloaded(t *testing.T) {
+	var bodies atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Last-Modified", "Wed, 01 Oct 2026 00:00:00 GMT")
+		if r.Header.Get("If-None-Match") == `"v1"` || r.Header.Get("If-Modified-Since") == "Wed, 01 Oct 2026 00:00:00 GMT" {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		bodies.Add(1)
+		w.Header().Set("Content-Type", "application/pdf")
+		_, _ = io.WriteString(w, "%PDF-1.7 report")
+	}))
+	defer srv.Close()
+	pdf := func(o *FetcherOptions) { o.PDF = fakePDF{"Laporan"} }
+
+	first, _ := testFetcher(t, srv, pdf)
+	page, err := first.Fetch(context.Background(), srv.URL+"/report.pdf")
+	if err != nil || page.ETag != `"v1"` || page.LastModified != "Wed, 01 Oct 2026 00:00:00 GMT" {
+		t.Fatalf("validators must be recorded: %+v, %v", page, err)
+	}
+
+	// A later crawl (a new process, so no cache) asks with either validator.
+	for name, v := range map[string]Validators{
+		"etag":          {ETag: page.ETag},
+		"last-modified": {LastModified: page.LastModified},
+	} {
+		later, _ := testFetcher(t, srv, pdf)
+		if _, err := later.FetchIfModified(context.Background(), srv.URL+"/report.pdf", v); !errors.Is(err, ErrNotModified) {
+			t.Errorf("%s: expected ErrNotModified, got %v", name, err)
+		}
+	}
+	if bodies.Load() != 1 {
+		t.Fatalf("the body must be downloaded once, was %d times", bodies.Load())
+	}
+
+	changed, _ := testFetcher(t, srv, pdf)
+	if _, err := changed.FetchIfModified(context.Background(), srv.URL+"/report.pdf", Validators{ETag: `"v0"`}); err != nil {
+		t.Fatalf("a changed page must be fetched: %v", err)
+	}
+}
+
 func TestFetch_StatusErrorCarriesRetryAfter(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/robots.txt" {

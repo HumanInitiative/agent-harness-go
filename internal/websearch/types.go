@@ -57,6 +57,10 @@ type Page struct {
 	Bytes         int
 	BodyTruncated bool
 	FetchedAt     time.Time
+	// ETag and LastModified are the server's validators for this version,
+	// for a later FetchIfModified. Either may be empty.
+	ETag         string
+	LastModified string
 }
 
 // Sentinel errors callers can branch on with errors.Is.
@@ -83,6 +87,9 @@ var (
 	ErrUnsupportedContent = errors.New("websearch: unsupported content type")
 	// ErrNotAllowedByRobots means robots.txt disallows the URL.
 	ErrNotAllowedByRobots = errors.New("websearch: disallowed by robots.txt")
+	// ErrNotModified means a conditional fetch found the page unchanged
+	// (HTTP 304); nothing was downloaded.
+	ErrNotModified = errors.New("websearch: not modified")
 	// ErrPDFUnavailable means a PDF was fetched but no PDF extractor is
 	// configured (pdftotext is not installed).
 	ErrPDFUnavailable = errors.New("websearch: pdf extraction unavailable")

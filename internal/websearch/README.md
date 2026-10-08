@@ -51,6 +51,9 @@ error and the harness still starts. PDFs are streamed to a temporary file
 `CSR_CRAWL_MAX_PDF_BYTES`, default 150 MiB, because annual and
 sustainability reports are often 50-150 MB). Page breaks are kept in
 `Page.Content` as `websearch.PageBreak` so callers can work page by page.
+`Page.ETag` and `Page.LastModified` let a later `FetchIfModified` ask
+whether the page changed; an unchanged page returns `ErrNotModified`
+without being downloaded.
 
 ## Using the package directly
 
