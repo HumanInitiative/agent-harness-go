@@ -134,6 +134,13 @@ func (c *Crawler) RunOnce(ctx context.Context) (CrawlReport, error) {
 			defer wg.Done()
 			for company := range jobs {
 				r, err := c.crawlCompany(ctx, company)
+				if err != nil && ctx.Err() == nil {
+					// Try again tomorrow rather than at the front of every
+					// run; a failed company is not a run-size problem.
+					if rerr := c.store.RescheduleCrawl(ctx, company.ID, c.opts.Now().Add(firstFailureRetry)); rerr != nil {
+						err = errors.Join(err, rerr)
+					}
+				}
 				mu.Lock()
 				report.Companies++
 				report.add(r)
@@ -260,16 +267,33 @@ func (c *Crawler) crawlCompany(ctx context.Context, company Company) (CrawlRepor
 	if needFullExtraction {
 		sources = fresh
 	}
+	// A changed page counts as processed only once its content has been
+	// extracted (or found to hold none). Until then its stored version is
+	// forgotten, so the next run fetches it in full and tries again; it
+	// would otherwise look unchanged forever (same hash, or a 304).
+	processed := false
+	defer func() {
+		if !processed && len(sources) > 0 {
+			if err := c.store.ForgetPageVersions(ctx, pageIDs(sources)); err != nil {
+				c.log.WarnContext(ctx, "csr could not reset page versions", "company_id", company.ID, "error", err)
+			}
+		}
+	}()
 	if c.extractor != nil && !c.opts.SkipExtraction && len(sources) > 0 {
 		sort.SliceStable(sources, func(i, j int) bool { return extractionOrder[sources[i].Kind] < extractionOrder[sources[j].Kind] })
 		ex, err := c.extractor.Extract(ctx, company, sources)
 		switch {
+		case errors.Is(err, ErrNoContent):
+			processed = true
 		case errors.Is(err, ErrExtractionFailed):
 			report.ExtractFailed++
 			c.log.WarnContext(ctx, "csr extraction failed", "company_id", company.ID, "error", err)
 		case err != nil:
 			return report, fmt.Errorf("extract: %w", err)
-		case ex.HasCSRContent:
+		case !ex.HasCSRContent:
+			processed = true
+		default:
+			processed = true
 			if err := c.store.SaveExtraction(ctx, company.ID, ex); err != nil {
 				return report, err
 			}
@@ -348,8 +372,18 @@ func (c *Crawler) checkPage(ctx context.Context, p Page, now time.Time, conditio
 	if err := c.store.SetPageValidators(ctx, p.ID, page.ETag, page.LastModified); err != nil {
 		return SourcePage{}, false, err
 	}
-	return SourcePage{URL: p.URL, Title: page.Title, Kind: p.Kind, Content: page.Content, FetchedAt: page.FetchedAt},
+	return SourcePage{pageID: p.ID, URL: p.URL, Title: page.Title, Kind: p.Kind, Content: page.Content, FetchedAt: page.FetchedAt},
 		hash != p.ContentHash, nil
+}
+
+func pageIDs(sources []SourcePage) []int64 {
+	ids := make([]int64, 0, len(sources))
+	for _, s := range sources {
+		if s.pageID != 0 {
+			ids = append(ids, s.pageID)
+		}
+	}
+	return ids
 }
 
 // backoff grows the retry delay with consecutive failures: 1, 2, 4, ...

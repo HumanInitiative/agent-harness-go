@@ -2,6 +2,7 @@ package csr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -358,6 +359,48 @@ func TestCrawl_RunSizeAndTimeLimitsReportLeftovers(t *testing.T) {
 	r, err = g.crawler.RunOnce(ctx)
 	if err != nil || r.Companies != 1 || r.StillDue != 2 {
 		t.Fatalf("the time limit must stop new companies: %+v, %v", r, err)
+	}
+}
+
+func TestCrawl_FailedExtractionIsRetriedWithTheChangedContent(t *testing.T) {
+	f := newCrawlFixture(t, CrawlOptions{}, goodExtraction)
+	ctx := context.Background()
+	id := mustInsert(t, f.store, Company{Name: "PT Contoh Energi Tbk", Domain: "contohenergi.co.id"})
+	f.web.pages["https://contohenergi.co.id/"] = homepage(link("TJSL", "https://contohenergi.co.id/tjsl"))
+	page := csrPage()
+	page.ETag = `"v1"`
+	f.web.pages["https://contohenergi.co.id/tjsl"] = page
+
+	// The model is unavailable (seen live: an invalid API key). The page
+	// was fetched, but its content was never extracted.
+	f.extractor.err = errors.New("Error 400: API key not valid")
+	r, err := f.crawler.RunOnce(ctx)
+	if err != nil || len(r.Errors) != 1 {
+		t.Fatalf("expected one company error: %+v, %v", r, err)
+	}
+	if r.StillDue != 0 {
+		t.Fatalf("a failed company is retried later, not reported as a run-size problem: %+v", r)
+	}
+	c, _ := f.store.Company(ctx, id)
+	if !c.NextCrawlAt.Equal(f.clock.now().Add(day)) {
+		t.Fatalf("a failed company must be retried in a day, got %s", c.NextCrawlAt)
+	}
+	routes, _ := f.store.Pages(ctx, id)
+	if routes[0].ContentHash != "" || routes[0].ETag != "" {
+		t.Fatalf("the unprocessed version must be forgotten: %+v", routes[0])
+	}
+
+	// The model is back the next day: the page is fetched in full (no 304
+	// from the forgotten ETag, no wait for its 7-day recheck) and
+	// extracted.
+	f.extractor.err = nil
+	f.clock.advance(day)
+	r, err = f.crawler.RunOnce(ctx)
+	if err != nil || r.Extracted != 1 || r.PagesNotModified != 0 {
+		t.Fatalf("expected the content to be extracted on retry: %+v, %v", r, err)
+	}
+	if _, err := f.store.Profile(ctx, id); err != nil {
+		t.Fatalf("profile missing after retry: %v", err)
 	}
 }
 

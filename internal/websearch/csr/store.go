@@ -305,6 +305,14 @@ func (s *Store) MarkCrawled(ctx context.Context, companyID int64, csrURL string,
 	return err
 }
 
+// RescheduleCrawl sets when a company is next due without recording a
+// crawl, e.g. to retry one that failed.
+func (s *Store) RescheduleCrawl(ctx context.Context, companyID int64, next time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE companies SET next_crawl_at = ?, updated_at = ? WHERE id = ?`,
+		ts(next), ts(s.now()), companyID)
+	return err
+}
+
 // SetStatus changes a company's review status. Only people (through the
 // review tools) call this with StatusVerified.
 func (s *Store) SetStatus(ctx context.Context, companyID int64, status string) error {
@@ -396,6 +404,19 @@ func (s *Store) SetPageValidators(ctx context.Context, pageID int64, etag, lastM
 	_, err := s.db.ExecContext(ctx, `UPDATE company_pages SET etag = nullif(?, ''), last_modified = nullif(?, '') WHERE id = ?`,
 		etag, lastModified, pageID)
 	return err
+}
+
+// ForgetPageVersions clears the content hash and validators of routes
+// whose new content could not be processed and makes them due, so the
+// company's next crawl fetches them in full and treats them as changed.
+func (s *Store) ForgetPageVersions(ctx context.Context, pageIDs []int64) error {
+	for _, id := range pageIDs {
+		if _, err := s.db.ExecContext(ctx, `UPDATE company_pages SET content_hash = NULL, etag = NULL,
+			last_modified = NULL, next_check_at = NULL WHERE id = ?`, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetPageState lets a person pin or reject a route (or restore it).

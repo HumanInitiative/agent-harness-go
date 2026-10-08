@@ -19,6 +19,11 @@ import (
 // after one corrective retry.
 var ErrExtractionFailed = errors.New("csr: extraction failed")
 
+// ErrNoContent means none of the sources had anything to extract from
+// (e.g. reports without a page that looks like CSR content); the model was
+// not called.
+var ErrNoContent = errors.New("csr: no pages to extract from")
+
 const (
 	maxExcerptChars        = 400
 	maxClaimChars          = 120
@@ -34,6 +39,9 @@ const (
 
 // SourcePage is a fetched page offered to the model as evidence.
 type SourcePage struct {
+	// pageID is the route the page was fetched from, when it came from the
+	// routing record.
+	pageID    int64
 	URL       string
 	Title     string
 	Kind      PageKind
@@ -239,7 +247,7 @@ func (p *ProfileExtractor) Extract(ctx context.Context, c Company, sources []Sou
 		}
 	}
 	if len(shown) == 0 {
-		return Extraction{}, errors.New("csr: no pages to extract from")
+		return Extraction{}, ErrNoContent
 	}
 
 	var content strings.Builder
