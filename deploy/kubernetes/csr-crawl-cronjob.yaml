@@ -1,0 +1,90 @@
+# Daily CSR crawl as a Kubernetes CronJob (02:00 WIB).
+#
+# Assumes the harness runs in the same namespace with:
+#   - a Secret "agent-harness-env" holding the environment from .env.example
+#     (GEMINI_API_KEY, SEARXNG_URL, CSR_* ...), and
+#   - a PersistentVolumeClaim "csr-data" holding the SQLite index at
+#     /app/data, mounted by the harness too.
+#
+# The index is a SQLite file: the harness and this job must reach the same
+# volume on the same node. With a ReadWriteOnce volume, keep the job on the
+# harness's node (the affinity below); a network file system is not safe
+# for SQLite. Moving to a shared database is the step beyond one node (see
+# the README, "Scaling beyond one instance").
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: csr-crawl
+  labels:
+    app.kubernetes.io/name: agent-harness
+    app.kubernetes.io/component: csr-crawl
+spec:
+  schedule: "0 2 * * *"
+  timeZone: Asia/Jakarta
+  # Kubernetes does not start a second job while one runs; the crawl lock in
+  # the database also refuses a manual `csrctl crawl` started meanwhile.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # A run starts no new company after CSR_CRAWL_MAX_RUN_MINUTES (default
+      # 180); this hard limit only catches a hung process.
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: agent-harness
+            app.kubernetes.io/component: csr-crawl
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: agent-harness
+                      app.kubernetes.io/component: server
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: csrctl
+              # Replace with the image and tag of the harness deployment.
+              image: agent-harness-go:latest
+              command: ["/usr/local/bin/csrctl", "crawl"]
+              envFrom:
+                - secretRef:
+                    name: agent-harness-env
+              volumeMounts:
+                - name: csr-data
+                  mountPath: /app/data
+                # pdftotext writes downloaded reports here (up to
+                # CSR_CRAWL_MAX_PDF_BYTES each, one per worker).
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: csr-data
+              persistentVolumeClaim:
+                claimName: csr-data
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi

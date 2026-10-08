@@ -1,10 +1,13 @@
 // Command csrctl manages the CSR prospect index: importing seed companies,
-// crawling them, and reviewing the results. Crawling is meant to be run by
-// an external scheduler (cron, a Kubernetes CronJob), never by a timer
-// inside the harness.
+// crawling them, and reviewing the results. Crawling runs outside the
+// harness: from cron or a Kubernetes CronJob (`csrctl crawl`), or as its
+// own long-running process (`csrctl schedule`, used by docker-compose).
+// Never more than one crawl runs at a time: each takes a lock in the index
+// database, and a second one exits with a message naming the first.
 //
 //	csrctl import seed.csv                 import or update seed companies
 //	csrctl crawl [-discover-only] [-company NAME]
+//	csrctl schedule [-at 02:00] [-tz Asia/Jakarta] [-discover-only]
 //	csrctl companies [-status new] [-limit 50]
 //	csrctl show NAME                       routes, access, profile, evidence
 //	csrctl route pin COMPANY_ID URL        record a CSR page by hand
@@ -55,6 +58,8 @@ commands:
   import FILE                      import seed companies from CSV or JSON
   crawl [-discover-only] [-company NAME]
                                    crawl due companies (or one company now)
+  schedule [-at HH:MM] [-tz ZONE] [-discover-only]
+                                   crawl due companies every day at a fixed time
   companies [-status S] [-limit N] list companies
   show NAME                        show a company's routes, profile and evidence
   route pin COMPANY_ID URL         record a CSR page by hand (never replaced automatically)
@@ -84,6 +89,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return cmdImport(ctx, store, rest, out)
 	case "crawl":
 		return cmdCrawl(ctx, cfg, store, log, rest, out)
+	case "schedule":
+		return cmdSchedule(ctx, cfg, store, log, rest, out)
 	case "companies":
 		return cmdCompanies(ctx, store, rest, out)
 	case "show":
@@ -136,7 +143,97 @@ func cmdCrawl(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, l
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	crawler, err := newCrawler(ctx, cfg, store, log, *discoverOnly)
+	if err != nil {
+		return err
+	}
 
+	var report csr.CrawlReport
+	err = withCrawlLock(ctx, store, log, func(ctx context.Context) error {
+		if *company == "" {
+			report, err = crawler.RunOnce(ctx)
+			return err
+		}
+		c, err := findOne(ctx, store, *company)
+		if err != nil {
+			return err
+		}
+		report, err = crawler.CrawlCompany(ctx, c)
+		report.Companies = 1
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	printReport(out, report)
+	return nil
+}
+
+// cmdSchedule runs the crawl every day at a fixed local time until
+// stopped. A run that finds another crawl in progress is skipped; a failed
+// run is logged and the schedule continues.
+func cmdSchedule(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, log *slog.Logger, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("schedule", flag.ContinueOnError)
+	at := fs.String("at", "02:00", "local time of day to crawl, HH:MM")
+	tz := fs.String("tz", "Asia/Jakarta", "time zone of -at")
+	discoverOnly := fs.Bool("discover-only", false, "find and check routes without calling the LLM")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	clock, err := time.Parse("15:04", *at)
+	if err != nil {
+		return fmt.Errorf("-at must be HH:MM, got %q", *at)
+	}
+	loc, err := time.LoadLocation(*tz)
+	if err != nil {
+		return fmt.Errorf("-tz: %w", err)
+	}
+	crawler, err := newCrawler(ctx, cfg, store, log, *discoverOnly)
+	if err != nil {
+		return err
+	}
+
+	for {
+		next := nextDailyRun(time.Now(), clock.Hour(), clock.Minute(), loc)
+		log.Info("next CSR crawl scheduled", "at", next.Format(time.RFC3339))
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+
+		var report csr.CrawlReport
+		err := withCrawlLock(ctx, store, log, func(ctx context.Context) error {
+			var err error
+			report, err = crawler.RunOnce(ctx)
+			return err
+		})
+		switch {
+		case ctx.Err() != nil:
+			return nil
+		case errors.Is(err, csr.ErrLocked):
+			log.Warn("scheduled CSR crawl skipped", "reason", err.Error())
+		case err != nil:
+			log.Error("scheduled CSR crawl failed", "error", err)
+		default:
+			printReport(out, report)
+		}
+	}
+}
+
+// nextDailyRun is the next time strictly after now at hour:minute in loc.
+func nextDailyRun(now time.Time, hour, minute int, loc *time.Location) time.Time {
+	local := now.In(loc)
+	next := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, loc)
+	if !next.After(local) {
+		next = time.Date(local.Year(), local.Month(), local.Day()+1, hour, minute, 0, 0, loc)
+	}
+	return next
+}
+
+func newCrawler(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, log *slog.Logger, discoverOnly bool) (*csr.Crawler, error) {
 	// Automated crawling always honours robots.txt and goes slower than
 	// interactive use, both per site and towards search engines.
 	web, err := bootstrap.NewWebStack(cfg.Web, bootstrap.WebStackOptions{
@@ -147,45 +244,95 @@ func cmdCrawl(ctx context.Context, cfg config.CrawlerConfig, store *csr.Store, l
 		PDFTimeout:          cfg.PDFTimeout,
 	}, log)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var extractor *csr.ProfileExtractor
-	if !*discoverOnly {
+	if !discoverOnly {
 		if cfg.GeminiAPIKey == "" {
-			return errors.New("GEMINI_API_KEY is required for extraction (or use -discover-only)")
+			return nil, errors.New("GEMINI_API_KEY is required for extraction (or use -discover-only)")
 		}
 		model, err := genkitmodel.New(ctx, genkitmodel.Config{Model: cfg.GenkitModel, APIKey: cfg.GeminiAPIKey}, log)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		extractor = csr.NewProfileExtractor(model, log)
 	}
 	resolver := csr.NewResolver(store, web.Fetcher, web.Router, csr.ResolveOptions{}, log)
-	crawler := csr.NewCrawler(store, resolver, web.Fetcher, extractor, csr.CrawlOptions{
-		Workers: cfg.Workers, CompaniesPerRun: cfg.CompaniesPerRun, SkipExtraction: *discoverOnly,
-	}, log)
+	return csr.NewCrawler(store, resolver, web.Fetcher, extractor, csr.CrawlOptions{
+		Workers: cfg.Workers, CompaniesPerRun: cfg.CompaniesPerRun, MaxRunDuration: cfg.MaxRunDuration,
+		SkipExtraction: discoverOnly,
+	}, log), nil
+}
 
-	var report csr.CrawlReport
-	if *company != "" {
-		c, err := findOne(ctx, store, *company)
-		if err != nil {
-			return err
+const (
+	crawlLockName = "crawl"
+	// crawlLockTTL bounds how long a crashed crawl blocks the next one; a
+	// running crawl renews the lock well before it expires.
+	crawlLockTTL       = 15 * time.Minute
+	crawlLockRenewEach = 5 * time.Minute
+)
+
+// withCrawlLock runs fn while holding the crawl lock, so a manual crawl
+// cannot overlap the scheduled one. If the lock is lost (renewal failed for
+// longer than its TTL), fn's context is cancelled.
+func withCrawlLock(ctx context.Context, store *csr.Store, log *slog.Logger, fn func(context.Context) error) error {
+	host, _ := os.Hostname()
+	holder := fmt.Sprintf("%s pid %d", host, os.Getpid())
+	if err := store.AcquireLock(ctx, crawlLockName, holder, crawlLockTTL); err != nil {
+		if errors.Is(err, csr.ErrLocked) {
+			return fmt.Errorf("another crawl is already running, not starting a second one: %w", err)
 		}
-		report, err = crawler.CrawlCompany(ctx, c)
-		if err != nil {
-			return err
-		}
-		report.Companies = 1
-	} else if report, err = crawler.RunOnce(ctx); err != nil {
 		return err
 	}
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	stopRenewing := make(chan struct{})
+	renewed := make(chan struct{})
+	go func() {
+		defer close(renewed)
+		ticker := time.NewTicker(crawlLockRenewEach)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopRenewing:
+				return
+			case <-ticker.C:
+				if err := store.RenewLock(runCtx, crawlLockName, holder, crawlLockTTL); err != nil {
+					log.Error("crawl lock could not be renewed; stopping the crawl", "error", err)
+					cancel(err)
+					return
+				}
+			}
+		}
+	}()
 
-	fmt.Fprintf(out, "companies %d | resolved %d (routes found %d) | pages fetched %d, changed %d | extracted %d, failed %d\n",
-		report.Companies, report.Resolved, report.RoutesFound, report.PagesFetched, report.PagesChanged, report.Extracted, report.ExtractFailed)
+	err := fn(runCtx)
+	close(stopRenewing)
+	<-renewed
+
+	// Release even when ctx was cancelled (e.g. SIGTERM), so the next run
+	// does not wait for the lock to expire.
+	releaseCtx, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer done()
+	if relErr := store.ReleaseLock(releaseCtx, crawlLockName, holder); relErr != nil {
+		log.Warn("crawl lock not released; it expires on its own", "error", relErr)
+	}
+	if cause := context.Cause(runCtx); err != nil && cause != nil && ctx.Err() == nil {
+		return fmt.Errorf("%w (%v)", err, cause)
+	}
+	return err
+}
+
+func printReport(out io.Writer, report csr.CrawlReport) {
+	fmt.Fprintf(out, "companies %d | resolved %d (routes found %d) | pages fetched %d, changed %d | extracted %d, failed %d | programs expired %d\n",
+		report.Companies, report.Resolved, report.RoutesFound, report.PagesFetched, report.PagesChanged,
+		report.Extracted, report.ExtractFailed, report.ProgramsExpired)
+	if report.StillDue > 0 {
+		fmt.Fprintf(out, "  %d companies are still due and wait for the next run (raise CSR_CRAWL_COMPANIES_PER_RUN if this persists)\n", report.StillDue)
+	}
 	for _, e := range report.Errors {
 		fmt.Fprintln(out, "  error:", e)
 	}
-	return nil
 }
 
 func cmdCompanies(ctx context.Context, store *csr.Store, args []string, out io.Writer) error {

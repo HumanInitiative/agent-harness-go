@@ -109,6 +109,9 @@ type CrawlerConfig struct {
 	// sustainability reports, which are often 50-150 MB.
 	MaxPDFBytes int64
 	PDFTimeout  time.Duration
+	// MaxRunDuration stops a run from starting new companies once it has
+	// run this long, so a scheduled run stays inside its window.
+	MaxRunDuration time.Duration
 }
 
 // LoadCrawler reads CrawlerConfig from the process environment.
@@ -128,11 +131,12 @@ func LoadCrawlerFrom(getenv func(string) string) (CrawlerConfig, error) {
 		GenkitModel:     r.str("GENKIT_MODEL", "googleai/gemini-flash-latest"),
 		CSR:             loadCSR(&r),
 		Workers:         r.positiveInt("CSR_CRAWL_WORKERS", 4),
-		CompaniesPerRun: r.positiveInt("CSR_CRAWL_COMPANIES_PER_RUN", 25),
+		CompaniesPerRun: r.positiveInt("CSR_CRAWL_COMPANIES_PER_RUN", 100),
 		DomainInterval:  r.seconds("CSR_CRAWL_DOMAIN_INTERVAL_SECONDS", 5),
 		SearchInterval:  r.seconds("CSR_CRAWL_SEARCH_INTERVAL_SECONDS", 6),
 		MaxPDFBytes:     int64(r.positiveInt("CSR_CRAWL_MAX_PDF_BYTES", 150<<20)),
 		PDFTimeout:      r.seconds("CSR_CRAWL_PDF_TIMEOUT_SECONDS", 300),
+		MaxRunDuration:  r.minutes("CSR_CRAWL_MAX_RUN_MINUTES", 180),
 	}
 	forced := func(key string) string {
 		if key == "WEB_TOOLS_ENABLED" {

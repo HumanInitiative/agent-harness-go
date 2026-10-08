@@ -206,7 +206,7 @@ func TestLoadCrawlerFrom_NeedsNoAPIKeysAndForcesWebValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a discovery-only crawler needs no secrets: %v", err)
 	}
-	if !cfg.Web.Enabled || cfg.Workers != 4 || cfg.CompaniesPerRun != 25 || cfg.GeminiAPIKey != "" {
+	if !cfg.Web.Enabled || cfg.Workers != 4 || cfg.CompaniesPerRun != 100 || cfg.MaxRunDuration != 3*time.Hour || cfg.GeminiAPIKey != "" {
 		t.Fatalf("unexpected crawler defaults: %+v", cfg)
 	}
 	// Web settings are validated even though WEB_TOOLS_ENABLED is unset.

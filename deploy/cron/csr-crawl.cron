@@ -1,0 +1,16 @@
+# Daily CSR crawl from the host's cron, for installs without docker-compose
+# (which has its own csr-crawler service) or Kubernetes (see
+# deploy/kubernetes/csr-crawl-cronjob.yaml).
+#
+# Install: adjust the paths, then `crontab -e` and paste the lines below, or
+# copy this file to /etc/cron.d/ (adding a user field after the time
+# fields). csrctl reads the same environment variables as the harness.
+#
+# A crawl that finds another one running exits immediately with a message,
+# so an overlapping manual run is harmless.
+#
+# CRON_TZ is supported by cronie (RHEL, Fedora, Arch) and systemd-cron; on
+# Debian/Ubuntu cron, drop it and write the time in the server's zone
+# (02:00 WIB is 19:00 UTC).
+CRON_TZ=Asia/Jakarta
+0 2 * * * cd /opt/agent-harness-go && set -a && . ./.env && set +a && /usr/local/bin/csrctl crawl >> /var/log/csr-crawl.log 2>&1

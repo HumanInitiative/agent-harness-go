@@ -24,6 +24,10 @@ type CrawlOptions struct {
 	CompaniesPerRun int
 	// PagesPerCompany caps routes fetched per company per run. Default 4.
 	PagesPerCompany int
+	// MaxRunDuration stops a run from starting new companies once it has
+	// run this long; companies in progress finish. It keeps a scheduled run
+	// inside its window. Zero means no limit.
+	MaxRunDuration time.Duration
 	// SkipExtraction runs discovery and route checks without calling the
 	// LLM (useful to review routes before spending model quota).
 	SkipExtraction bool
@@ -87,6 +91,7 @@ func NewCrawler(store *Store, resolver *Resolver, fetcher Fetcher, extractor *Pr
 
 // CrawlReport summarizes a run.
 type CrawlReport struct {
+	// Companies counts companies processed.
 	Companies     int
 	Resolved      int
 	RoutesFound   int
@@ -117,7 +122,7 @@ func (c *Crawler) RunOnce(ctx context.Context) (CrawlReport, error) {
 		return CrawlReport{}, err
 	}
 	var mu sync.Mutex
-	report := CrawlReport{Companies: len(due), ProgramsExpired: expired}
+	report := CrawlReport{ProgramsExpired: expired}
 	jobs := make(chan Company)
 	var wg sync.WaitGroup
 	for w := 0; w < c.opts.Workers; w++ {
@@ -127,6 +132,7 @@ func (c *Crawler) RunOnce(ctx context.Context) (CrawlReport, error) {
 			for company := range jobs {
 				r, err := c.crawlCompany(ctx, company)
 				mu.Lock()
+				report.Companies++
 				report.add(r)
 				if err != nil {
 					report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", company.Name, err))
@@ -135,10 +141,17 @@ func (c *Crawler) RunOnce(ctx context.Context) (CrawlReport, error) {
 			}
 		}()
 	}
+dispatch:
 	for _, company := range due {
+		if c.opts.MaxRunDuration > 0 && c.opts.Now().Sub(start) >= c.opts.MaxRunDuration {
+			c.log.WarnContext(ctx, "csr crawl reached its maximum run time; remaining companies wait for the next run",
+				"max_run_duration", c.opts.MaxRunDuration.String())
+			break
+		}
 		select {
 		case jobs <- company:
 		case <-ctx.Done():
+			break dispatch
 		}
 	}
 	close(jobs)

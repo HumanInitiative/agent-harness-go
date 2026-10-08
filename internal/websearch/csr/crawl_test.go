@@ -286,6 +286,30 @@ func TestCrawl_FailedExtractionStoresNothing(t *testing.T) {
 	}
 }
 
+func TestCrawl_RunSizeAndTimeLimitsReportLeftovers(t *testing.T) {
+	f := newCrawlFixture(t, CrawlOptions{CompaniesPerRun: 2, Workers: 1})
+	ctx := context.Background()
+	for _, name := range []string{"PT Satu", "PT Dua", "PT Tiga"} {
+		mustInsert(t, f.store, Company{Name: name}) // no domain: nothing to fetch
+	}
+	r, err := f.crawler.RunOnce(ctx)
+	if err != nil || r.Companies != 2 || r.StillDue != 1 {
+		t.Fatalf("a run of 2 out of 3 due companies must report 1 left over: %+v, %v", r, err)
+	}
+
+	// Each look at the clock costs an hour, so processing one company uses
+	// up the two-hour limit and the run starts no other.
+	g := newCrawlFixture(t, CrawlOptions{MaxRunDuration: 2 * time.Hour, Workers: 1})
+	for _, name := range []string{"PT Satu", "PT Dua", "PT Tiga"} {
+		mustInsert(t, g.store, Company{Name: name})
+	}
+	g.crawler.opts.Now = func() time.Time { g.clock.advance(time.Hour); return g.clock.now() }
+	r, err = g.crawler.RunOnce(ctx)
+	if err != nil || r.Companies != 1 || r.StillDue != 2 {
+		t.Fatalf("the time limit must stop new companies: %+v, %v", r, err)
+	}
+}
+
 func TestCheckCompany_FindsByNameVariants(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

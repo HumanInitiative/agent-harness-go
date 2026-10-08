@@ -8,8 +8,11 @@
 # (DuckDuckGo is blocked outright), which would silently weaken search.
 # SearXNG is reachable only from the harness, never from the internet.
 #
-# The CSR index is filled by csrctl, run on a schedule (e.g. weekly from the
-# host's cron), never by a timer inside the harness:
+# The CSR index is filled by csrctl, outside the harness: the csr-crawler
+# service below crawls every day at 02:00 WIB. Seed companies are imported
+# once (and again whenever the seed list changes); a crawl can also be
+# started by hand, and waits for nothing: if the scheduled crawl is running,
+# it exits with a message instead of crawling twice.
 #
 #   docker compose -f deploy/docker-compose.yml --env-file .env run --rm \
 #     --entrypoint csrctl harness import /app/seed/companies.csv
@@ -21,6 +24,7 @@ services:
   harness:
     build:
       context: ..
+    image: agent-harness:local
     env_file: ../.env
     environment:
       WEB_TOOLS_ENABLED: "true"
@@ -38,6 +42,26 @@ services:
     restart: unless-stopped
     # Must exceed SHUTDOWN_TIMEOUT_SECONDS so in-flight requests can drain.
     stop_grace_period: 80s
+
+  # Daily crawl of due companies into the shared index. A separate process
+  # from the harness, so crawling never competes with chat requests, and
+  # only one of it: the crawl lock in the database refuses a second crawl.
+  csr-crawler:
+    build:
+      context: ..
+    image: agent-harness:local
+    entrypoint: ["/usr/local/bin/csrctl"]
+    command: ["schedule", "-at", "02:00", "-tz", "Asia/Jakarta"]
+    env_file: ../.env
+    environment:
+      SEARXNG_URL: http://searxng:8080
+      WEB_SEARCH_PROVIDERS: searxng,duckduckgo
+    volumes:
+      - csr-data:/app/data
+    depends_on:
+      searxng:
+        condition: service_healthy
+    restart: unless-stopped
 
   searxng:
     # Pinned for reproducible behaviour; Dependabot proposes updates.
