@@ -109,10 +109,18 @@ func run() error {
 		}
 		defer store.Close()
 		index := csr.NewIndex(store, profile, csr.IndexOptions{StaleAfter: cfg.CSR.StaleAfter})
-		log.Info("CSR tools enabled", "db", cfg.CSR.DBPath)
+		checkCompany := tools.NewCheckCompanyTool(index, nil)
+		if cfg.CSR.OnDemandEnabled {
+			onDemand, err := bootstrap.NewOnDemand(cfg.Web, cfg.CSR, store, index, model, log)
+			if err != nil {
+				return fmt.Errorf("initialize CSR on-demand lookups: %w", err)
+			}
+			checkCompany.WithLookup(onDemand)
+		}
+		log.Info("CSR tools enabled", "db", cfg.CSR.DBPath, "on_demand", cfg.CSR.OnDemandEnabled)
 		registeredTools = append(registeredTools,
 			tools.NewFindCSRProspectsTool(index, nil),
-			tools.NewCheckCompanyTool(index, nil),
+			checkCompany,
 		)
 	}
 

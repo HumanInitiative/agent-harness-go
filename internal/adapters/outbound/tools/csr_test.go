@@ -163,3 +163,58 @@ func TestCheckCompany_WithoutProfile(t *testing.T) {
 		t.Fatalf("got:\n%s", out)
 	}
 }
+
+type fakeLookup struct {
+	result csr.LookupResult
+	err    error
+	asked  string
+}
+
+func (f *fakeLookup) LookUp(_ context.Context, name string) (csr.LookupResult, error) {
+	f.asked = name
+	return f.result, f.err
+}
+
+func TestCheckCompany_LooksUpUnknownCompaniesOnDemand(t *testing.T) {
+	found := sampleProspect()
+	found.Company.Source = csr.SourceOnDemand
+	found.Company.ReviewNote = "nama mirip dengan PT Contoh Energi Lama (id 4)"
+	lookup := &fakeLookup{result: csr.LookupResult{Prospects: []csr.Prospect{found}, Started: true, Complete: false}}
+	tool := NewCheckCompanyTool(&fakeIndex{}, fixedNow).WithLookup(lookup)
+
+	out, err := tool.Execute(context.Background(), json.RawMessage(`{"name":"Contoh Energi"}`))
+	if err != nil || lookup.asked != "Contoh Energi" {
+		t.Fatalf("got %q, %v", out, err)
+	}
+	for _, want := range []string{
+		"baru saja dicari langsung di situsnya (on-demand). Hasilnya belum diverifikasi manusia.",
+		"Pencarian belum selesai dalam batas waktu",
+		"Asal data: dicari langsung atas permintaan",
+		"Catatan untuk ditinjau: nama mirip dengan PT Contoh Energi Lama (id 4)",
+		"1. PT Contoh Energi Tbk",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\n%s", want, out)
+		}
+	}
+	if !strings.Contains(tool.Description(), "looked up on its own website") {
+		t.Error("the description must say unknown companies are looked up")
+	}
+
+	for err, want := range map[error]string{
+		csr.ErrLookupLimit:     "hourly limit of direct lookups is used up",
+		csr.ErrNotACompanyName: "too generic to look up",
+	} {
+		tool := NewCheckCompanyTool(&fakeIndex{}, fixedNow).WithLookup(&fakeLookup{err: err})
+		if out, _ := tool.Execute(context.Background(), json.RawMessage(`{"name":"Bank"}`)); !strings.Contains(out, want) {
+			t.Errorf("%v: got %q", err, out)
+		}
+	}
+	// A company in the index is never looked up.
+	known := &fakeLookup{}
+	_, _ = NewCheckCompanyTool(&fakeIndex{prospects: []csr.Prospect{sampleProspect()}}, fixedNow).WithLookup(known).
+		Execute(context.Background(), json.RawMessage(`{"name":"Contoh Energi"}`))
+	if known.asked != "" {
+		t.Fatal("a known company must not trigger a lookup")
+	}
+}

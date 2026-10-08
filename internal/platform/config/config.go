@@ -73,6 +73,12 @@ type CSRConfig struct {
 	StaleAfter time.Duration
 	// DiscoveryConfigPath is the YAML file of open-discovery queries.
 	DiscoveryConfigPath string
+	// OnDemandEnabled lets check_company look up companies that are not in
+	// the index on their own websites, within OnDemandTimeout and at most
+	// OnDemandPerHour times an hour. Harness only; needs the web tools.
+	OnDemandEnabled bool
+	OnDemandTimeout time.Duration
+	OnDemandPerHour int
 }
 
 func loadCSR(r *reader) CSRConfig {
@@ -82,6 +88,9 @@ func loadCSR(r *reader) CSRConfig {
 		InstitutionProfilePath: r.str("CSR_INSTITUTION_PROFILE", "config/institution-profile.yaml"),
 		StaleAfter:             time.Duration(r.positiveInt("CSR_STALE_AFTER_DAYS", 120)) * 24 * time.Hour,
 		DiscoveryConfigPath:    r.str("CSR_DISCOVERY_CONFIG", "config/discovery.yaml"),
+		OnDemandEnabled:        r.boolean("CSR_ON_DEMAND_ENABLED", false),
+		OnDemandTimeout:        r.seconds("CSR_ON_DEMAND_TIMEOUT_SECONDS", 40),
+		OnDemandPerHour:        r.positiveInt("CSR_ON_DEMAND_PER_HOUR", 20),
 	}
 }
 
@@ -214,6 +223,7 @@ func (c Config) LogValue() slog.Value {
 		slog.Bool("web_fetch_respect_robots", c.Web.RespectRobotsOnFetch),
 		slog.Bool("csr_tools_enabled", c.CSR.ToolsEnabled),
 		slog.String("csr_db_path", c.CSR.DBPath),
+		slog.Bool("csr_on_demand_enabled", c.CSR.OnDemandEnabled),
 	)
 }
 
@@ -256,6 +266,15 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	cfg.CSR = loadCSR(&r)
 	if cfg.CSR.ToolsEnabled && (cfg.CSR.DBPath == "" || cfg.CSR.InstitutionProfilePath == "") {
 		r.fail("CSR_DB_PATH and CSR_INSTITUTION_PROFILE are required when CSR_TOOLS_ENABLED=true")
+	}
+	if cfg.CSR.OnDemandEnabled {
+		if !cfg.CSR.ToolsEnabled || !cfg.Web.Enabled {
+			r.fail("CSR_ON_DEMAND_ENABLED needs CSR_TOOLS_ENABLED=true and WEB_TOOLS_ENABLED=true")
+		}
+		if cfg.CSR.OnDemandTimeout >= cfg.RequestTimeout {
+			r.fail(fmt.Sprintf("CSR_ON_DEMAND_TIMEOUT_SECONDS (%s) must be shorter than REQUEST_TIMEOUT_SECONDS (%s), "+
+				"leaving time for the model to answer", cfg.CSR.OnDemandTimeout, cfg.RequestTimeout))
+		}
 	}
 
 	if cfg.GeminiAPIKey == "" {

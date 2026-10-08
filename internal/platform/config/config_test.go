@@ -201,6 +201,22 @@ func TestLoadFrom_CSRToolsOffByDefault(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_OnDemandNeedsWebToolsAndAShortTimeout(t *testing.T) {
+	base := merge(merge(requiredOnly(), "CSR_TOOLS_ENABLED", "true"), "CSR_ON_DEMAND_ENABLED", "true")
+	if _, err := config.LoadFrom(env(base)); err == nil || !strings.Contains(err.Error(), "WEB_TOOLS_ENABLED") {
+		t.Fatalf("on-demand lookups need the web tools: %v", err)
+	}
+	withWeb := merge(base, "WEB_TOOLS_ENABLED", "true")
+	cfg, err := config.LoadFrom(env(withWeb))
+	if err != nil || !cfg.CSR.OnDemandEnabled || cfg.CSR.OnDemandTimeout != 40*time.Second || cfg.CSR.OnDemandPerHour != 20 {
+		t.Fatalf("got %+v, %v", cfg.CSR, err)
+	}
+	if _, err := config.LoadFrom(env(merge(withWeb, "CSR_ON_DEMAND_TIMEOUT_SECONDS", "60"))); err == nil ||
+		!strings.Contains(err.Error(), "CSR_ON_DEMAND_TIMEOUT_SECONDS") {
+		t.Fatalf("a lookup must leave the model time to answer: %v", err)
+	}
+}
+
 func TestLoadCrawlerFrom_NeedsNoAPIKeysAndForcesWebValidation(t *testing.T) {
 	cfg, err := config.LoadCrawlerFrom(env(map[string]string{}))
 	if err != nil {

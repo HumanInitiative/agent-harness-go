@@ -274,7 +274,8 @@ func (c *Crawler) crawlCompany(ctx context.Context, company Company) (CrawlRepor
 	processed := false
 	defer func() {
 		if !processed && len(sources) > 0 {
-			if err := c.store.ForgetPageVersions(ctx, pageIDs(sources)); err != nil {
+			// Not ctx: this must also happen when ctx ran out (a budget).
+			if err := c.store.ForgetPageVersions(context.WithoutCancel(ctx), pageIDs(sources)); err != nil {
 				c.log.WarnContext(ctx, "csr could not reset page versions", "company_id", company.ID, "error", err)
 			}
 		}

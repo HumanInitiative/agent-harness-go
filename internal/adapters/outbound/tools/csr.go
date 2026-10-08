@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -135,10 +136,24 @@ func (t *FindCSRProspectsTool) Execute(ctx context.Context, args json.RawMessage
 	return websearch.Wrap("csr_index", t.now(), sb.String()), nil
 }
 
-// CheckCompanyTool reports what the local index knows about one company.
+// CompanyLookup finds a company that is not in the index yet; satisfied by
+// *csr.OnDemand.
+type CompanyLookup interface {
+	LookUp(ctx context.Context, name string) (csr.LookupResult, error)
+}
+
+// CheckCompanyTool reports what the local index knows about one company,
+// and with a CompanyLookup looks up companies the index does not know.
 type CheckCompanyTool struct {
-	index ProspectIndex
-	now   func() time.Time
+	index  ProspectIndex
+	lookup CompanyLookup
+	now    func() time.Time
+}
+
+// WithLookup enables on-demand lookups of companies not in the index.
+func (t *CheckCompanyTool) WithLookup(lookup CompanyLookup) *CheckCompanyTool {
+	t.lookup = lookup
+	return t
 }
 
 // NewCheckCompanyTool builds the tool. now may be nil (time.Now).
@@ -152,10 +167,14 @@ func NewCheckCompanyTool(index ProspectIndex, now func() time.Time) *CheckCompan
 func (t *CheckCompanyTool) Name() string { return "check_company" }
 
 func (t *CheckCompanyTool) Description() string {
+	scope := "Only the local index is searched; for companies not in it, web_search and web_fetch may be used."
+	if t.lookup != nil {
+		scope = "A company not in the index is looked up on its own website right away (this takes up to a minute " +
+			"and its result is marked as not yet verified by a person); if that does not finish, the nightly crawl completes it."
+	}
 	return "Looks up one company in the local CSR index: its CSR pages, extracted CSR profile and programs with " +
 		"evidence and dates, and fit with the institution. Only active programs are shown unless include_inactive " +
-		"is true. Only the local index is searched; for companies not in it, web_search and web_fetch may be used." +
-		indexFirstGuidance
+		"is true. " + scope + indexFirstGuidance
 }
 
 func (t *CheckCompanyTool) InputSchema() map[string]any {
@@ -187,6 +206,31 @@ func (t *CheckCompanyTool) Execute(ctx context.Context, args json.RawMessage) (s
 	if err != nil {
 		return "", fmt.Errorf("check_company: %w", err)
 	}
+	var sb strings.Builder
+	if len(prospects) == 0 && t.lookup != nil {
+		result, err := t.lookup.LookUp(ctx, in.Name)
+		switch {
+		case errors.Is(err, csr.ErrNotACompanyName):
+			return fmt.Sprintf("%q is not in the local CSR index and is too generic to look up; ask for the "+
+				"company's full name.", in.Name), nil
+		case errors.Is(err, csr.ErrLookupLimit):
+			return fmt.Sprintf("%q is not in the local CSR index, and the hourly limit of direct lookups is used "+
+				"up. You may use web_search and web_fetch, but say that those findings are not yet verified in "+
+				"the CSR index.", in.Name), nil
+		case err != nil:
+			return "", fmt.Errorf("check_company: look up %q: %w", in.Name, err)
+		}
+		prospects = result.Prospects
+		if result.Started {
+			sb.WriteString("Perusahaan ini belum ada di index; baru saja dicari langsung di situsnya (on-demand). " +
+				"Hasilnya belum diverifikasi manusia.\n")
+			if !result.Complete {
+				sb.WriteString("Pencarian belum selesai dalam batas waktu; crawl terjadwal malam ini akan " +
+					"melanjutkannya. Sampaikan bahwa datanya mungkin belum lengkap.\n")
+			}
+			sb.WriteString("\n")
+		}
+	}
 	if len(prospects) == 0 {
 		return fmt.Sprintf("%q is not in the local CSR index. You may look it up with web_search and web_fetch, "+
 			"but say that those findings are not yet verified in the CSR index.", in.Name), nil
@@ -194,7 +238,6 @@ func (t *CheckCompanyTool) Execute(ctx context.Context, args json.RawMessage) (s
 	if len(prospects) > maxCheckedCompanies {
 		prospects = prospects[:maxCheckedCompanies]
 	}
-	var sb strings.Builder
 	for i, p := range prospects {
 		writeProspect(&sb, i+1, p, true, programsPerCompany)
 	}
@@ -230,6 +273,15 @@ func writeProspect(sb *strings.Builder, n int, p csr.Prospect, withRoutes bool, 
 		review = "dikecualikan"
 	}
 	fmt.Fprintf(sb, "   Skor kecocokan: %d/100 | keyakinan ekstraksi: %.2f | status: %s\n", p.Match.Score, c.Confidence, review)
+	switch c.Source {
+	case csr.SourceSignal:
+		sb.WriteString("   Asal data: ditemukan lewat pemberitaan atau halaman pihak lain (bukan daftar awal)\n")
+	case csr.SourceOnDemand:
+		sb.WriteString("   Asal data: dicari langsung atas permintaan (bukan daftar awal)\n")
+	}
+	if c.ReviewNote != "" {
+		fmt.Fprintf(sb, "   Catatan untuk ditinjau: %s\n", c.ReviewNote)
+	}
 	if p.Profile != nil {
 		fmt.Fprintf(sb, "   Data per: %s (terakhir dibaca dari sumber) | sumber terakhir dicek: %s\n",
 			date(p.Freshness.ExtractedAt), date(p.Freshness.CheckedAt))

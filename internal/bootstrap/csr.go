@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -39,4 +40,19 @@ func LoadDiscoveryConfig(cfg config.CSRConfig) (csr.DiscoveryConfig, error) {
 	}
 	defer f.Close()
 	return csr.LoadDiscoveryConfig(f)
+}
+
+// NewOnDemand builds on-demand lookups for check_company: a one-company
+// crawler with its own robots.txt-respecting web stack, so lookups are as
+// polite to company sites as the scheduled crawl.
+func NewOnDemand(web config.WebConfig, cfg config.CSRConfig, store *csr.Store, index *csr.Index,
+	extractor csr.Extractor, log *slog.Logger) (*csr.OnDemand, error) {
+	stack, err := NewWebStack(web, WebStackOptions{RespectRobots: true}, log)
+	if err != nil {
+		return nil, err
+	}
+	resolver := csr.NewResolver(store, stack.Fetcher, stack.Router, csr.ResolveOptions{}, log)
+	crawler := csr.NewCrawler(store, resolver, stack.Fetcher, csr.NewProfileExtractor(extractor, log),
+		csr.CrawlOptions{Workers: 1, PagesPerCompany: 3}, log)
+	return csr.NewOnDemand(store, crawler, index, csr.OnDemandOptions{Budget: cfg.OnDemandTimeout, PerHour: cfg.OnDemandPerHour}, log), nil
 }
