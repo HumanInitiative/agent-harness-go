@@ -1,0 +1,13 @@
+# One Human Initiative program to find funders for.
+#   csrctl shortlist -program config/program.example.yaml
+# The same fields go in the body of POST /api/v1/outreach. Replace these
+# values with a real program; they are an example.
+program:
+  name: Beasiswa Anak Desa
+  description: >-
+    Beasiswa dan pendampingan belajar untuk 120 anak di desa terpencil
+    Jawa Barat, selama satu tahun ajaran.
+  # At least one focus area is required: companies are scored on it.
+  focus_areas: [pendidikan]
+  regions: [Jawa Barat]
+  program_types: [beasiswa, pelatihan]

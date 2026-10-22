@@ -116,6 +116,7 @@ func run() error {
 		reports = httpapi.NewReportHandler(stack.Service, log)
 		log.Info("report endpoint enabled", "source", stack.Source, "formats", stack.Service.Formats())
 	}
+	var outreachHandler *httpapi.OutreachHandler
 	if cfg.CSR.ToolsEnabled {
 		profile, err := bootstrap.LoadInstitutionProfile(cfg.CSR)
 		if err != nil {
@@ -134,6 +135,15 @@ func run() error {
 				return fmt.Errorf("initialize CSR on-demand lookups: %w", err)
 			}
 			checkCompany.WithLookup(onDemand)
+		}
+		if cfg.Outreach.Enabled {
+			outreachService, err := bootstrap.NewOutreachService(cfg.Outreach, store, profile.MinConfidence, cfg.CSR.StaleAfter, model, log)
+			if err != nil {
+				return fmt.Errorf("initialize outreach: %w", err)
+			}
+			outreachHandler = httpapi.NewOutreachHandler(outreachService, log)
+			log.Info("outreach endpoint enabled", "formats", outreachService.Formats(),
+				"cost_estimate", cfg.Outreach.InputRupiahPerMillion > 0 || cfg.Outreach.OutputRupiahPerMillion > 0)
 		}
 		log.Info("CSR tools enabled", "db", cfg.CSR.DBPath, "on_demand", cfg.CSR.OnDemandEnabled)
 		registeredTools = append(registeredTools,
@@ -164,6 +174,7 @@ func run() error {
 		RateLimitPerMinute: cfg.RateLimitPerMinute,
 		RateLimitBurst:     cfg.RateLimitBurst,
 		Reports:            reports,
+		Outreach:           outreachHandler,
 	})
 	if err != nil {
 		return fmt.Errorf("initialize router: %w", err)

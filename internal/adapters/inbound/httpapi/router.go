@@ -33,6 +33,9 @@ type RouterConfig struct {
 	// page at /reports. Nil leaves them unmounted (404), which is how the
 	// report feature stays off.
 	Reports *ReportHandler
+	// Outreach serves POST /api/v1/outreach (the pilot 2 shortlist). Nil
+	// leaves it unmounted (404).
+	Outreach *OutreachHandler
 }
 
 // NewRouter builds the complete HTTP router.
@@ -83,6 +86,9 @@ func NewRouter(chat *ChatHandler, log *slog.Logger, cfg RouterConfig) (http.Hand
 		api.Use(limiter.Middleware)
 		api.Use(Timeout(cfg.RequestTimeout))
 		api.Method(http.MethodPost, "/chat", chat)
+		if cfg.Outreach != nil {
+			api.Method(http.MethodPost, "/outreach", cfg.Outreach)
+		}
 		if cfg.Reports != nil {
 			api.Method(http.MethodPost, "/reports", cfg.Reports)
 			api.Get("/programs", cfg.Reports.Programs)

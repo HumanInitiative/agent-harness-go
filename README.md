@@ -167,6 +167,14 @@ from the donation data API (`REPORT_API_URL`); until it exists, `make mock-api`
 serves invented ones ([contract](docs/donation-data-api.md)). See
 [docs/donation-report-template.md](docs/donation-report-template.md).
 
+### Funder shortlist
+
+Behind `OUTREACH_ENABLED` (and `CSR_TOOLS_ENABLED`), `POST /api/v1/outreach`
+scores the CSR index against one Human Initiative program and returns the
+best-fitting companies with the reasons, the evidence, and a draft approach
+email each, with a cost trace. See [docs/outreach.md](docs/outreach.md);
+`csrctl shortlist` shows the ranking without a model.
+
 ### Adding a tool
 
 1. Implement `outbound.ToolHandler` in `internal/adapters/outbound/tools/`

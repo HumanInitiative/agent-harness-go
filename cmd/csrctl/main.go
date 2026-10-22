@@ -15,6 +15,8 @@
 //	csrctl route pin COMPANY_ID URL        record a CSR page by hand
 //	csrctl route reject|restore PAGE_ID    correct the routing record
 //	csrctl set-status COMPANY_ID new|verified|excluded
+//	csrctl shortlist -program FILE.yaml [-limit 10] [-csv]
+//	                                       companies that fit one program, from the index alone
 //
 // Configuration comes from the same environment variables as the harness
 // (see .env.example); output goes to stdout, logs to stderr.
@@ -71,7 +73,10 @@ commands:
   route pin COMPANY_ID URL         record a CSR page by hand (never replaced automatically)
   route reject PAGE_ID             mark a route as not a CSR page
   route restore PAGE_ID            make a rejected or pinned route automatic again
-  set-status COMPANY_ID STATUS     set review status: new, verified or excluded`
+  set-status COMPANY_ID STATUS     set review status: new, verified or excluded
+  shortlist -program FILE [-limit N] [-csv]
+                                   rank the indexed companies against one program (no model
+                                   call); -csv writes a sheet for a person to rate relevance`
 
 func run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
@@ -109,6 +114,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return cmdRoute(ctx, store, rest, out)
 	case "set-status":
 		return cmdSetStatus(ctx, store, rest, out)
+	case "shortlist":
+		return cmdShortlist(ctx, cfg, store, rest, out)
 	default:
 		return fmt.Errorf("unknown command %q\n%s", cmd, usage)
 	}

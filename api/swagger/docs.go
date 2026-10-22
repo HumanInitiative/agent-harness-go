@@ -104,6 +104,94 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/outreach": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Scores the companies in the CSR index against one Human Initiative program and returns the\nbest fits with the reasons and the evidence behind them. Unless emails is false, each company\nalso gets a draft approach email written by the model, which may only claim what cited\nevidence says; whatever the checks cannot confirm is listed in the entry's notes. Every draft\nneeds human review. With format \"docx\" the response is the Word file instead of JSON.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ],
+                "tags": [
+                    "outreach"
+                ],
+                "summary": "Shortlist companies that may fund a program, with draft approach emails",
+                "parameters": [
+                    {
+                        "description": "Outreach request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.OutreachRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "format docx",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "invalid_request: malformed body, missing focus area, bad limit or format",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: missing or invalid X-API-Key",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "request_too_large",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "no_prospects: no indexed company fits the program",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "rate_limited: see Retry-After header",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "internal_error",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "model_unavailable: see Retry-After header",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "timeout",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/programs": {
             "get": {
                 "security": [
@@ -348,7 +436,8 @@ const docTemplate = `{
                         "program_not_found",
                         "document_not_found",
                         "no_documents",
-                        "narrative_failed"
+                        "narrative_failed",
+                        "no_prospects"
                     ],
                     "example": "invalid_request"
                 },
@@ -361,6 +450,292 @@ const docTemplate = `{
                     "description": "RequestID identifies the request in the server logs; include it when\nreporting a problem.",
                     "type": "string",
                     "example": "5b1f6c9e-7a0d-4c7e-8f5e-2d9a1c3b4e6f"
+                }
+            }
+        },
+        "httpapi.OutreachCompanyDTO": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "PT Contoh Energi"
+                },
+                "region": {
+                    "type": "string"
+                },
+                "sector": {
+                    "type": "string"
+                },
+                "verified": {
+                    "description": "Verified is true only when a person confirmed the company record.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "httpapi.OutreachEmailDTO": {
+            "type": "object",
+            "properties": {
+                "basis": {
+                    "description": "Basis is the evidence the email cites.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpapi.OutreachEvidenceDTO"
+                    }
+                },
+                "body": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.OutreachEmailTraceDTO": {
+            "type": "object",
+            "properties": {
+                "attempts": {
+                    "type": "integer"
+                },
+                "company": {
+                    "type": "string"
+                },
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "outcome": {
+                    "type": "string"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "httpapi.OutreachEntryDTO": {
+            "type": "object",
+            "properties": {
+                "company": {
+                    "$ref": "#/definitions/httpapi.OutreachCompanyDTO"
+                },
+                "confirmed_at": {
+                    "description": "ConfirmedAt is when the company's data was last confirmed current.",
+                    "type": "string",
+                    "example": "2026-09-01"
+                },
+                "email": {
+                    "description": "Email is null when none was asked for or drafting failed (Notes say\nwhich).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/httpapi.OutreachEmailDTO"
+                        }
+                    ]
+                },
+                "notes": {
+                    "description": "Notes are what the reviewer must check before acting on this entry.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "programs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpapi.OutreachProgramLineDTO"
+                    }
+                },
+                "proposal_channel": {
+                    "type": "string"
+                },
+                "reasons": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "score": {
+                    "description": "Score is 0-100; Reasons say why.",
+                    "type": "integer",
+                    "example": 82
+                },
+                "stale": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "httpapi.OutreachEvidenceDTO": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "example": "2026-09-01"
+                },
+                "date_published": {
+                    "description": "DatePublished is true when Date is the publication date, false when\nit is the date the page was retrieved.",
+                    "type": "boolean"
+                },
+                "excerpt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 11
+                },
+                "title": {
+                    "type": "string",
+                    "example": "Program TJSL"
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://contoh.co.id/csr"
+                }
+            }
+        },
+        "httpapi.OutreachProgramDTO": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "Description helps the model word the email; at most 3000 characters.",
+                    "type": "string",
+                    "example": "Beasiswa untuk 120 anak di desa terpencil Jawa Barat."
+                },
+                "focus_areas": {
+                    "description": "FocusAreas are the fields the program works in. At least one is\nrequired: companies are scored on it.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "pendidikan"
+                    ]
+                },
+                "name": {
+                    "description": "Name of the program. Required.",
+                    "type": "string",
+                    "example": "Beasiswa Anak Desa"
+                },
+                "program_types": {
+                    "description": "ProgramTypes are the kinds of support needed.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "beasiswa"
+                    ]
+                },
+                "regions": {
+                    "description": "Regions where the program works. Empty means anywhere.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "Jawa Barat"
+                    ]
+                }
+            }
+        },
+        "httpapi.OutreachProgramLineDTO": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "period_end": {
+                    "type": "string"
+                },
+                "period_start": {
+                    "type": "string"
+                },
+                "proposal_deadline": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "httpapi.OutreachRequest": {
+            "type": "object",
+            "properties": {
+                "emails": {
+                    "description": "Emails asks for a draft email per company (the default). Set false\nfor the shortlist alone, which costs no model call.",
+                    "type": "boolean",
+                    "example": true
+                },
+                "format": {
+                    "description": "Format is \"json\" (default) or \"docx\" (the shortlist as a Word file).",
+                    "type": "string",
+                    "enum": [
+                        "json",
+                        "docx"
+                    ],
+                    "example": "json"
+                },
+                "limit": {
+                    "description": "Limit is the number of companies, 1-25. Defaults to 10.",
+                    "type": "integer",
+                    "example": 10
+                },
+                "program": {
+                    "$ref": "#/definitions/httpapi.OutreachProgramDTO"
+                }
+            }
+        },
+        "httpapi.OutreachResponse": {
+            "type": "object",
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpapi.OutreachEntryDTO"
+                    }
+                },
+                "generated_at": {
+                    "type": "string",
+                    "example": "2026-10-22"
+                },
+                "program": {
+                    "$ref": "#/definitions/httpapi.OutreachProgramDTO"
+                },
+                "trace": {
+                    "$ref": "#/definitions/httpapi.OutreachTraceDTO"
+                }
+            }
+        },
+        "httpapi.OutreachTraceDTO": {
+            "type": "object",
+            "properties": {
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "emails": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpapi.OutreachEmailTraceDTO"
+                    }
+                },
+                "estimated_cost_rupiah": {
+                    "description": "EstimatedCostRupiah is present only when token prices are configured.",
+                    "type": "number"
+                },
+                "fitting": {
+                    "description": "Fitting is how many companies fit the program before the cut.",
+                    "type": "integer"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "output_tokens": {
+                    "type": "integer"
                 }
             }
         },

@@ -59,6 +59,7 @@ definitions:
         - document_not_found
         - no_documents
         - narrative_failed
+        - no_prospects
         example: invalid_request
         type: string
       error:
@@ -71,6 +72,212 @@ definitions:
           reporting a problem.
         example: 5b1f6c9e-7a0d-4c7e-8f5e-2d9a1c3b4e6f
         type: string
+    type: object
+  httpapi.OutreachCompanyDTO:
+    properties:
+      domain:
+        type: string
+      id:
+        type: integer
+      name:
+        example: PT Contoh Energi
+        type: string
+      region:
+        type: string
+      sector:
+        type: string
+      verified:
+        description: Verified is true only when a person confirmed the company record.
+        type: boolean
+    type: object
+  httpapi.OutreachEmailDTO:
+    properties:
+      basis:
+        description: Basis is the evidence the email cites.
+        items:
+          $ref: '#/definitions/httpapi.OutreachEvidenceDTO'
+        type: array
+      body:
+        type: string
+      subject:
+        type: string
+    type: object
+  httpapi.OutreachEmailTraceDTO:
+    properties:
+      attempts:
+        type: integer
+      company:
+        type: string
+      duration_ms:
+        type: integer
+      input_tokens:
+        type: integer
+      outcome:
+        type: string
+      output_tokens:
+        type: integer
+    type: object
+  httpapi.OutreachEntryDTO:
+    properties:
+      company:
+        $ref: '#/definitions/httpapi.OutreachCompanyDTO'
+      confirmed_at:
+        description: ConfirmedAt is when the company's data was last confirmed current.
+        example: "2026-09-01"
+        type: string
+      email:
+        allOf:
+        - $ref: '#/definitions/httpapi.OutreachEmailDTO'
+        description: |-
+          Email is null when none was asked for or drafting failed (Notes say
+          which).
+      notes:
+        description: Notes are what the reviewer must check before acting on this
+          entry.
+        items:
+          type: string
+        type: array
+      programs:
+        items:
+          $ref: '#/definitions/httpapi.OutreachProgramLineDTO'
+        type: array
+      proposal_channel:
+        type: string
+      reasons:
+        items:
+          type: string
+        type: array
+      score:
+        description: Score is 0-100; Reasons say why.
+        example: 82
+        type: integer
+      stale:
+        type: boolean
+    type: object
+  httpapi.OutreachEvidenceDTO:
+    properties:
+      date:
+        example: "2026-09-01"
+        type: string
+      date_published:
+        description: |-
+          DatePublished is true when Date is the publication date, false when
+          it is the date the page was retrieved.
+        type: boolean
+      excerpt:
+        type: string
+      id:
+        example: 11
+        type: integer
+      title:
+        example: Program TJSL
+        type: string
+      url:
+        example: https://contoh.co.id/csr
+        type: string
+    type: object
+  httpapi.OutreachProgramDTO:
+    properties:
+      description:
+        description: Description helps the model word the email; at most 3000 characters.
+        example: Beasiswa untuk 120 anak di desa terpencil Jawa Barat.
+        type: string
+      focus_areas:
+        description: |-
+          FocusAreas are the fields the program works in. At least one is
+          required: companies are scored on it.
+        example:
+        - pendidikan
+        items:
+          type: string
+        type: array
+      name:
+        description: Name of the program. Required.
+        example: Beasiswa Anak Desa
+        type: string
+      program_types:
+        description: ProgramTypes are the kinds of support needed.
+        example:
+        - beasiswa
+        items:
+          type: string
+        type: array
+      regions:
+        description: Regions where the program works. Empty means anywhere.
+        example:
+        - Jawa Barat
+        items:
+          type: string
+        type: array
+    type: object
+  httpapi.OutreachProgramLineDTO:
+    properties:
+      name:
+        type: string
+      period_end:
+        type: string
+      period_start:
+        type: string
+      proposal_deadline:
+        type: string
+      status:
+        type: string
+    type: object
+  httpapi.OutreachRequest:
+    properties:
+      emails:
+        description: |-
+          Emails asks for a draft email per company (the default). Set false
+          for the shortlist alone, which costs no model call.
+        example: true
+        type: boolean
+      format:
+        description: Format is "json" (default) or "docx" (the shortlist as a Word
+          file).
+        enum:
+        - json
+        - docx
+        example: json
+        type: string
+      limit:
+        description: Limit is the number of companies, 1-25. Defaults to 10.
+        example: 10
+        type: integer
+      program:
+        $ref: '#/definitions/httpapi.OutreachProgramDTO'
+    type: object
+  httpapi.OutreachResponse:
+    properties:
+      entries:
+        items:
+          $ref: '#/definitions/httpapi.OutreachEntryDTO'
+        type: array
+      generated_at:
+        example: "2026-10-22"
+        type: string
+      program:
+        $ref: '#/definitions/httpapi.OutreachProgramDTO'
+      trace:
+        $ref: '#/definitions/httpapi.OutreachTraceDTO'
+    type: object
+  httpapi.OutreachTraceDTO:
+    properties:
+      duration_ms:
+        type: integer
+      emails:
+        items:
+          $ref: '#/definitions/httpapi.OutreachEmailTraceDTO'
+        type: array
+      estimated_cost_rupiah:
+        description: EstimatedCostRupiah is present only when token prices are configured.
+        type: number
+      fitting:
+        description: Fitting is how many companies fit the program before the cut.
+        type: integer
+      input_tokens:
+        type: integer
+      output_tokens:
+        type: integer
     type: object
   httpapi.ProgramDTO:
     properties:
@@ -235,6 +442,69 @@ paths:
       summary: Send a message to the agent
       tags:
       - agent
+  /api/v1/outreach:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Scores the companies in the CSR index against one Human Initiative program and returns the
+        best fits with the reasons and the evidence behind them. Unless emails is false, each company
+        also gets a draft approach email written by the model, which may only claim what cited
+        evidence says; whatever the checks cannot confirm is listed in the entry's notes. Every draft
+        needs human review. With format "docx" the response is the Word file instead of JSON.
+      parameters:
+      - description: Outreach request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.OutreachRequest'
+      produces:
+      - application/json
+      - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      responses:
+        "200":
+          description: format docx
+          schema:
+            type: file
+        "400":
+          description: 'invalid_request: malformed body, missing focus area, bad limit
+            or format'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "401":
+          description: 'unauthorized: missing or invalid X-API-Key'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "413":
+          description: request_too_large
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "422":
+          description: 'no_prospects: no indexed company fits the program'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "429":
+          description: 'rate_limited: see Retry-After header'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "500":
+          description: internal_error
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "503":
+          description: 'model_unavailable: see Retry-After header'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "504":
+          description: timeout
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Shortlist companies that may fund a program, with draft approach emails
+      tags:
+      - outreach
   /api/v1/programs:
     get:
       produces:
