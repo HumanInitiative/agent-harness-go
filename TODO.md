@@ -135,6 +135,66 @@ has reviewed the failures.
 - [ ] Mask donor names, not only contact details (`report.MaskPersonalData`
       handles emails, phone numbers and national IDs only).
 
+## Pilot 2: funder shortlist and approach emails
+
+Goal: from one Human Initiative program, a shortlist of companies that may
+fund it, each with the reasons, the evidence and a draft approach email, for
+a person to review. Built on the CSR index above. How it works:
+[docs/outreach.md](docs/outreach.md).
+
+The flow is built end to end and tested with a fake model and an in-memory
+index: `POST /api/v1/outreach` (behind `OUTREACH_ENABLED`), `csrctl shortlist`
+(no model needed, with a CSV rating sheet), emails checked against the
+evidence they cite, per-run trace of tokens and estimated cost. What is left
+needs real index data, a Gemini key and the program team. Same rule as pilot
+1: facts come from the index and its evidence, the model only words the email.
+
+### Needs a crawled index (a Gemini key and SearXNG)
+
+- [ ] The index is only as good as what has been crawled: do the real
+      extraction and discovery items under "Follow-ups to Phase 2.5" and
+      "Phase 3 follow-ups" first. `csrctl shortlist` then shows what exists
+      for a program; with a thin index, `fitting` will be small.
+- [ ] Decide `CSR_REVIEWER_KEY_IDS` and review companies from the shortlist
+      (`csrctl set-status`): most are `new`, and each entry says so.
+
+### Needs the program team
+
+- [ ] Real Human Initiative programs (name, description, focus areas, regions,
+      types), 3 to 5 to start. They are sent in the request today; decide
+      whether they should come from a list (the donation API has programs, but
+      not their focus areas) or a file in `config/`.
+- [ ] Rate relevance: run `csrctl shortlist -csv` for 3 or more real programs
+      and have the Penanggung Jawab fill the sheet for about 30 companies.
+      Target: at least 70% relevant. Tune `internal/websearch/csr/score.go`
+      from the misses.
+- [ ] Read 10 or more drafted emails with a real model and judge tone,
+      language and length; adjust the prompt in
+      `internal/application/prospecting/email.go`. Decide how emails are
+      signed (today `[Nama pengirim]`, `[Jabatan]`, `[Kontak]`).
+- [ ] Replace the example values in `config/institution-profile.yaml`: they
+      still drive the chat tools (`find_csr_prospects`), though not the
+      shortlist.
+
+### Needs a Gemini key
+
+- [ ] Check cost and time of a run of 10 companies with emails; set
+      `MODEL_*_RUPIAH_PER_MILLION_TOKENS` to the real prices so the trace
+      shows rupiah. The request timeout (default 60 s) must cover the slowest
+      run: lower `limit` or raise `REQUEST_TIMEOUT_SECONDS` if needed.
+- [ ] Look at how often an email is rejected twice (trace `outcome`) and how
+      often the number check flags something; those rates say whether the
+      prompt or the checks need work.
+
+### Later
+
+- [ ] A page for the program team like `/reports`: describe a program, see
+      the shortlist with notes and evidence, edit and copy an email.
+- [ ] Remember past shortlists and emails sent, so a company is not
+      approached twice for the same program (needs a person to record what
+      was sent).
+- [ ] Chat tool that drafts an email for one company on request.
+
 ## Decisions and data waiting on people
 
 - [ ] Replace the example values in `config/institution-profile.yaml` with

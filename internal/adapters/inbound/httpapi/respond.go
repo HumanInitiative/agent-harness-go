@@ -25,6 +25,7 @@ const (
 	codeDocumentNotFound = "document_not_found"
 	codeNoDocuments      = "no_documents"
 	codeNarrativeFailed  = "narrative_failed"
+	codeNoProspects      = "no_prospects"
 )
 
 // statusClientClosedRequest is the de-facto (nginx) status for "the client

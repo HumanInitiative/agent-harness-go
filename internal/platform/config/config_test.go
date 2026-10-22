@@ -336,3 +336,29 @@ func TestConfig_LogValueHidesTheReportAPIKey(t *testing.T) {
 		t.Errorf("the API URL is not secret and should be logged: %s", rendered)
 	}
 }
+
+func TestLoad_Outreach(t *testing.T) {
+	cfg, err := config.LoadFrom(env(requiredOnly()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Outreach.Enabled || cfg.Outreach.InputRupiahPerMillion != 0 {
+		t.Errorf("defaults: %+v", cfg.Outreach)
+	}
+	on := merge(merge(requiredOnly(), "OUTREACH_ENABLED", "true"), "CSR_TOOLS_ENABLED", "true")
+	cfg, err = config.LoadFrom(env(merge(merge(on, "MODEL_INPUT_RUPIAH_PER_MILLION_TOKENS", "1500"), "MODEL_OUTPUT_RUPIAH_PER_MILLION_TOKENS", "9000.5")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Outreach.Enabled || cfg.Outreach.InputRupiahPerMillion != 1500 || cfg.Outreach.OutputRupiahPerMillion != 9000.5 {
+		t.Errorf("outreach: %+v", cfg.Outreach)
+	}
+	if _, err := config.LoadFrom(env(merge(requiredOnly(), "OUTREACH_ENABLED", "true"))); err == nil || !strings.Contains(err.Error(), "CSR_TOOLS_ENABLED") {
+		t.Errorf("outreach without the CSR index must fail, got %v", err)
+	}
+	for _, bad := range []string{"-1", "abc"} {
+		if _, err := config.LoadFrom(env(merge(requiredOnly(), "MODEL_INPUT_RUPIAH_PER_MILLION_TOKENS", bad))); err == nil {
+			t.Errorf("price %q must be refused", bad)
+		}
+	}
+}

@@ -68,6 +68,21 @@ type Config struct {
 
 	// Donation report tools (get_report_figures).
 	Report ReportConfig
+
+	// Funder shortlist and approach emails (POST /api/v1/outreach).
+	Outreach OutreachConfig
+}
+
+// OutreachConfig switches on the pilot 2 shortlist.
+type OutreachConfig struct {
+	// Enabled mounts POST /api/v1/outreach. It reads the CSR index, so it
+	// needs CSR_TOOLS_ENABLED=true.
+	Enabled bool
+	// InputRupiahPerMillion and OutputRupiahPerMillion are the model's
+	// token prices in rupiah per million tokens, used to estimate what a run
+	// cost. Zero means unknown: runs then report tokens but no cost.
+	InputRupiahPerMillion  float64
+	OutputRupiahPerMillion float64
 }
 
 // ReportConfig switches on the donation report feature: the
@@ -270,6 +285,7 @@ func (c Config) LogValue() slog.Value {
 		slog.Bool("csr_on_demand_enabled", c.CSR.OnDemandEnabled),
 		slog.Bool("report_tools_enabled", c.Report.ToolsEnabled),
 		slog.String("report_api_url", c.Report.APIURL),
+		slog.Bool("outreach_enabled", c.Outreach.Enabled),
 	)
 }
 
@@ -331,6 +347,14 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	if cfg.Report.APITimeout >= cfg.RequestTimeout {
 		r.fail(fmt.Sprintf("REPORT_API_TIMEOUT_SECONDS (%s) must be shorter than REQUEST_TIMEOUT_SECONDS (%s)",
 			cfg.Report.APITimeout, cfg.RequestTimeout))
+	}
+	cfg.Outreach = OutreachConfig{
+		Enabled:                r.boolean("OUTREACH_ENABLED", false),
+		InputRupiahPerMillion:  r.nonNegativeFloat("MODEL_INPUT_RUPIAH_PER_MILLION_TOKENS", 0),
+		OutputRupiahPerMillion: r.nonNegativeFloat("MODEL_OUTPUT_RUPIAH_PER_MILLION_TOKENS", 0),
+	}
+	if cfg.Outreach.Enabled && !cfg.CSR.ToolsEnabled {
+		r.fail("OUTREACH_ENABLED=true needs CSR_TOOLS_ENABLED=true: the shortlist reads the CSR index")
 	}
 	if cfg.CSR.ToolsEnabled && (cfg.CSR.DBPath == "" || cfg.CSR.InstitutionProfilePath == "") {
 		r.fail("CSR_DB_PATH and CSR_INSTITUTION_PROFILE are required when CSR_TOOLS_ENABLED=true")
@@ -507,6 +531,19 @@ func (r *reader) positiveFloat(key string, def float64) float64 {
 	f, err := strconv.ParseFloat(raw, 64)
 	if err != nil || f <= 0 {
 		r.fail(fmt.Sprintf("%s must be a positive number, got %q", key, raw))
+		return def
+	}
+	return f
+}
+
+func (r *reader) nonNegativeFloat(key string, def float64) float64 {
+	raw := strings.TrimSpace(r.getenv(key))
+	if raw == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil || f < 0 {
+		r.fail(fmt.Sprintf("%s must be zero or a positive number, got %q", key, raw))
 		return def
 	}
 	return f
