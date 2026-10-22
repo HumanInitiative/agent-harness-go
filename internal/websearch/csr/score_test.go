@@ -123,3 +123,21 @@ func TestConceptAndRegionNormalization(t *testing.T) {
 		t.Error("different provinces must not match")
 	}
 }
+
+func TestScore_FocusMatchIsSeparateFromTheScore(t *testing.T) {
+	ip := testInstitution(t)
+	// Region and a proposal channel earn points, but the company works in a
+	// field the institution does not.
+	m := ip.Score(Company{}, &Profile{
+		FocusAreas:      claimsOf("olahraga"),
+		Regions:         claimsOf("Jawa Barat"),
+		ProposalChannel: &Claim{Value: "csr@contoh.co.id", EvidenceIDs: []int64{1}},
+		ModelConfidence: 0.9,
+	})
+	if m.Score != 30 || m.FocusMatch {
+		t.Fatalf("score = %d, FocusMatch = %v: want 30 points without a focus match", m.Score, m.FocusMatch)
+	}
+	if m := ip.Score(Company{}, &Profile{FocusAreas: claimsOf("beasiswa"), ModelConfidence: 0.9}); !m.FocusMatch {
+		t.Errorf("a focus match must be reported: %+v", m)
+	}
+}
