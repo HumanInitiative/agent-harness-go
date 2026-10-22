@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/HumanInitiative/agent-harness-go/internal/adapters/inbound/httpapi"
+	"github.com/HumanInitiative/agent-harness-go/internal/adapters/outbound/memory"
 	"github.com/HumanInitiative/agent-harness-go/internal/application/agent"
 	"github.com/HumanInitiative/agent-harness-go/internal/domain/conversation"
 	"github.com/HumanInitiative/agent-harness-go/internal/platform/logger"
@@ -115,7 +116,7 @@ func newTestServer(t *testing.T, model outbound.ModelPort, mutate ...func(*httpa
 	logs := &syncBuffer{}
 	log := logger.New(logs, slog.LevelDebug, "json")
 
-	svc, err := agent.NewService(model, &fakeStore{data: map[string][]conversation.Message{}}, nil,
+	svc, err := agent.NewService(model, &fakeStore{data: map[string][]conversation.Message{}}, memory.NewTurnGuard(), nil,
 		agent.Config{MaxToolTurns: 2, HistoryWindow: 10, MaxMessageChars: 200}, log)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)

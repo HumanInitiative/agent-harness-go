@@ -20,7 +20,8 @@ touching business logic. See [Architecture](#architecture).
 - ❌ No per-user authorization: every valid API key can use every tool.
 - ❌ Conversations are not durable: they live in process memory, are
   bounded, and are lost on restart. (The CSR index is durable: SQLite.)
-- ❌ Single instance only (see [Scaling beyond one instance](#scaling-beyond-one-instance)).
+- ❌ Single instance only until the rate limit and CSR index are shared (see
+  [Scaling beyond one instance](#scaling-beyond-one-instance)).
 
 ## Quickstart
 
@@ -171,13 +172,16 @@ reports the failure to the model.
 
 ### Scaling beyond one instance
 
-Three things are per-process and must move to shared infrastructure (e.g.
-Redis/Postgres) before running more than one replica:
+Set `REDIS_URL` and the conversation store and the per-conversation "turn in
+progress" guard live in Redis (`adapters/outbound/redisstore`) instead of
+process memory, so any replica can continue any conversation. Two things are
+still per-process and must be dealt with before running more than one replica:
 
-- the conversation store (`adapters/outbound/memory`),
-- the per-conversation "turn in progress" guard (`application/agent/keyset.go`),
 - the rate limiter (`adapters/inbound/httpapi/ratelimit.go`); with N replicas
-  the effective limit is N times the configured one.
+  the effective limit is N times the configured one,
+- the CSR index (a SQLite file on one volume).
+
+[docs/scaling.md](docs/scaling.md) lays out the rest.
 
 ## Web tools
 

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -49,9 +50,15 @@ type Config struct {
 	MaxMessageChars int
 	HistoryWindow   int
 
-	// In-memory conversation store.
+	// Conversation store. MaxConversations bounds the in-memory store only;
+	// with Redis, bound it on the server (maxmemory + an eviction policy).
 	MaxConversations int
 	ConversationTTL  time.Duration
+
+	// Shared state for running more than one instance. Empty RedisURL keeps
+	// conversations and turn claims in process memory.
+	RedisURL       string // may hold a password; secret
+	RedisKeyPrefix string
 
 	// Web tools (web_search, web_fetch).
 	Web WebConfig
@@ -231,6 +238,7 @@ func (c Config) LogValue() slog.Value {
 		slog.Int("history_window", c.HistoryWindow),
 		slog.Int("max_conversations", c.MaxConversations),
 		slog.Duration("conversation_ttl", c.ConversationTTL),
+		slog.Bool("redis_enabled", c.RedisURL != ""),
 		slog.Bool("web_tools_enabled", c.Web.Enabled),
 		slog.String("web_search_providers", strings.Join(c.Web.Providers, ",")),
 		slog.Bool("web_fetch_respect_robots", c.Web.RespectRobotsOnFetch),
@@ -274,6 +282,9 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 
 		MaxConversations: r.positiveInt("MAX_CONVERSATIONS", 10000),
 		ConversationTTL:  r.minutes("CONVERSATION_TTL_MINUTES", 24*60),
+
+		RedisURL:       r.str("REDIS_URL", ""),
+		RedisKeyPrefix: r.str("REDIS_KEY_PREFIX", "harness:"),
 	}
 	cfg.Web = loadWeb(&r, cfg.RequestTimeout)
 	cfg.CSR = loadCSR(&r)
@@ -305,6 +316,12 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	for i, k := range cfg.APIKeys {
 		if len(k) < minAPIKeyLength {
 			r.fail(fmt.Sprintf("API_KEYS entry %d is %d characters; the minimum is %d", i+1, len(k), minAPIKeyLength))
+		}
+	}
+	if cfg.RedisURL != "" {
+		// Never echo the value: it can carry a password.
+		if u, err := url.Parse(cfg.RedisURL); err != nil || (u.Scheme != "redis" && u.Scheme != "rediss") || u.Host == "" {
+			r.fail("REDIS_URL must be a redis:// or rediss:// URL, e.g. redis://host:6379/0")
 		}
 	}
 	if cfg.ShutdownTimeout < cfg.RequestTimeout {

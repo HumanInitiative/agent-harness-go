@@ -68,13 +68,16 @@ type Service struct {
 	tools         []outbound.ToolHandler
 	cfg           Config
 	logger        *slog.Logger
-	inFlight      *keySet
+	turns         outbound.TurnGuard
 }
 
 // NewService wires a Service from its ports and validates its
 // configuration. Every registered tool is available to every caller on
 // every turn (this build has no per-user authorization).
-func NewService(model outbound.ModelPort, conversations outbound.ConversationStore, tools []outbound.ToolHandler, cfg Config, logger *slog.Logger) (*Service, error) {
+func NewService(model outbound.ModelPort, conversations outbound.ConversationStore, turns outbound.TurnGuard, tools []outbound.ToolHandler, cfg Config, logger *slog.Logger) (*Service, error) {
+	if turns == nil {
+		return nil, errors.New("agent: TurnGuard is required")
+	}
 	if cfg.MaxToolTurns < 1 {
 		return nil, fmt.Errorf("agent: MaxToolTurns must be >= 1, got %d", cfg.MaxToolTurns)
 	}
@@ -99,7 +102,7 @@ func NewService(model outbound.ModelPort, conversations outbound.ConversationSto
 		tools:         tools,
 		cfg:           cfg,
 		logger:        logger,
-		inFlight:      newKeySet(),
+		turns:         turns,
 	}, nil
 }
 
@@ -132,10 +135,14 @@ func (s *Service) Chat(ctx context.Context, in ChatInput) (ChatOutput, error) {
 		conversationID = uuid.NewString()
 	}
 
-	if !s.inFlight.tryAdd(conversationID) {
+	release, acquired, err := s.turns.TryAcquire(ctx, conversationID)
+	if err != nil {
+		return ChatOutput{}, fmt.Errorf("agent: claim conversation turn: %w", err)
+	}
+	if !acquired {
 		return ChatOutput{}, ErrConversationBusy
 	}
-	defer s.inFlight.remove(conversationID)
+	defer release()
 
 	history, err := s.conversations.History(ctx, conversationID)
 	if err != nil {

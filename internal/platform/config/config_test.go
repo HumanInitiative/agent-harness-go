@@ -121,6 +121,45 @@ func TestConfig_LogValueNeverContainsSecrets(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_RedisIsOffByDefault(t *testing.T) {
+	cfg, err := config.LoadFrom(env(requiredOnly()))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if cfg.RedisURL != "" || cfg.RedisKeyPrefix != "harness:" {
+		t.Errorf("redis defaults = %q, %q", cfg.RedisURL, cfg.RedisKeyPrefix)
+	}
+}
+
+func TestLoadFrom_ValidatesRedisURLWithoutEchoingIt(t *testing.T) {
+	for _, ok := range []string{"redis://cache:6379/0", "rediss://:pw@cache.example.org:6380"} {
+		if _, err := config.LoadFrom(env(merge(requiredOnly(), "REDIS_URL", ok))); err != nil {
+			t.Errorf("REDIS_URL=%q rejected: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"cache:6379", "http://:s3cret@cache", "redis://", "://x"} {
+		_, err := config.LoadFrom(env(merge(requiredOnly(), "REDIS_URL", bad)))
+		if err == nil {
+			t.Errorf("REDIS_URL=%q accepted", bad)
+			continue
+		}
+		if strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("error leaks the password: %v", err)
+		}
+	}
+}
+
+func TestConfig_LogValueHidesTheRedisURL(t *testing.T) {
+	cfg, err := config.LoadFrom(env(merge(requiredOnly(), "REDIS_URL", "redis://:s3cret@cache:6379")))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	rendered := cfg.LogValue().String()
+	if strings.Contains(rendered, "s3cret") || !strings.Contains(rendered, "redis_enabled=true") {
+		t.Errorf("log value = %s", rendered)
+	}
+}
+
 func merge(base map[string]string, key, value string) map[string]string {
 	out := make(map[string]string, len(base)+1)
 	for k, v := range base {

@@ -129,32 +129,37 @@ hanya bila ada kebutuhan lain pada database relasional.
 
 ## Perubahan kode yang diperlukan
 
-Urutan dari yang terpenting:
+Status pengerjaan (urutan dari yang terpenting):
 
-1. **`ConversationStore` berbasis Redis.** Adapter baru di
-   `internal/adapters/outbound/` yang memenuhi port yang sudah ada, dengan TTL
-   sama seperti `CONVERSATION_TTL_MINUTES` dan batas jumlah pesan sama seperti
-   `HISTORY_WINDOW_MESSAGES`.
-2. **Kunci giliran terdistribusi.** Ganti `keySet` dengan antarmuka (misalnya
-   `TurnGuard`) yang punya implementasi memori dan implementasi Redis
-   (`SET key NX PX <ttl>`). TTL wajib ada supaya instance yang mati tidak
-   mengunci percakapan selamanya, dan sedikit lebih besar daripada
-   `REQUEST_TIMEOUT_SECONDS`.
-3. **Rate limit bersama.** Tiga jalan, dari termudah:
+1. **Selesai: `ConversationStore` berbasis Redis**
+   ([`adapters/outbound/redisstore`](../internal/adapters/outbound/redisstore/conversation_store.go)).
+   Daftar Redis yang dipangkas ke `HISTORY_WINDOW_MESSAGES + 2` pesan dan
+   TTL `CONVERSATION_TTL_MINUTES` yang diperbarui tiap append. Jumlah
+   percakapan tidak dibatasi aplikasi; batasi di server Redis dengan
+   `maxmemory` dan `maxmemory-policy allkeys-lru`.
+2. **Selesai: kunci giliran terdistribusi.** `keySet` diganti port
+   `outbound.TurnGuard` dengan implementasi memori dan Redis
+   (`SET NX PX`, dilepas dengan skrip yang memeriksa pemilik). TTL klaim =
+   `REQUEST_TIMEOUT_SECONDS` + 15 detik, jadi instance yang mati tidak
+   mengunci percakapan lebih lama dari itu.
+3. **Selesai: konfigurasi.** `REDIS_URL` (kosong = mode memori, perilaku lama)
+   dan `REDIS_KEY_PREFIX`, dipilih di
+   [`cmd/harness/main.go`](../cmd/harness/main.go). Percakapan dan kunci giliran
+   selalu berpindah bersama. Tes dua instance yang berbagi satu Redis ada di
+   [`multi_instance_test.go`](../internal/application/agent/multi_instance_test.go).
+4. **Belum: rate limit bersama.** Tiga jalan, dari termudah:
    - terima batas N kali lipat dan turunkan nilai per instance (paling murah,
      kurang presisi),
    - hitung di Redis dengan token bucket atau sliding window,
    - pindahkan ke AWS WAF di depan ALB (rate-based rule), dengan tarif terpisah.
-4. **Indeks CSR** sesuai pilihan A atau B di atas.
-5. **Konfigurasi.** Variabel baru seperti `REDIS_URL` dan pemilihan adapter di
-   [`cmd/harness/main.go`](../cmd/harness/main.go) (composition root). Biarkan
-   adapter memori sebagai default supaya deployment satu-EC2 tetap jalan tanpa
-   Redis.
-6. **Uji.** Tes konkurensi untuk `TurnGuard` dan tes yang menjalankan dua
-   instance terhadap satu Redis.
+5. **Belum: indeks CSR** sesuai pilihan A atau B di atas.
+6. **Belum: pemeriksaan Redis di `/readyz`.** Sengaja ditunda: saat Redis mati
+   semua instance gagal bersamaan, jadi mengeluarkannya dari load balancer
+   tidak menolong. Aplikasi sudah gagal cepat (timeout 2 detik) dan gagal saat
+   start bila Redis tidak terjangkau.
 
 Karena arsitekturnya heksagonal, perubahan 1 sampai 3 tidak menyentuh logika
-agen.
+agen selain penggantian `keySet` dengan port.
 
 ## Infrastruktur tanpa Kubernetes
 

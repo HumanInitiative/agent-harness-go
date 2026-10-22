@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/HumanInitiative/agent-harness-go/internal/adapters/outbound/memory"
 	"github.com/HumanInitiative/agent-harness-go/internal/application/agent"
 	"github.com/HumanInitiative/agent-harness-go/internal/domain/conversation"
 	"github.com/HumanInitiative/agent-harness-go/internal/ports/outbound"
@@ -85,7 +86,7 @@ func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Disca
 
 func newService(t *testing.T, model outbound.ModelPort, store outbound.ConversationStore, cfg agent.Config) *agent.Service {
 	t.Helper()
-	svc, err := agent.NewService(model, store, nil, cfg, discardLogger())
+	svc, err := agent.NewService(model, store, memory.NewTurnGuard(), nil, cfg, discardLogger())
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestNewService_RejectsInvalidConfig(t *testing.T) {
 	}
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := agent.NewService(&fakeModel{}, newFakeStore(), nil, cfg, discardLogger()); err == nil {
+			if _, err := agent.NewService(&fakeModel{}, newFakeStore(), memory.NewTurnGuard(), nil, cfg, discardLogger()); err == nil {
 				t.Fatal("expected an error")
 			}
 		})
@@ -109,7 +110,7 @@ func TestNewService_RejectsInvalidConfig(t *testing.T) {
 
 func TestNewService_RejectsDuplicateToolNames(t *testing.T) {
 	tools := []outbound.ToolHandler{namedTool{"calculator"}, namedTool{"calculator"}}
-	if _, err := agent.NewService(&fakeModel{}, newFakeStore(), tools, validConfig(), discardLogger()); err == nil {
+	if _, err := agent.NewService(&fakeModel{}, newFakeStore(), memory.NewTurnGuard(), tools, validConfig(), discardLogger()); err == nil {
 		t.Fatal("expected an error for duplicate tool names")
 	}
 }

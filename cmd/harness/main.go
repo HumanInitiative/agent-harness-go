@@ -34,6 +34,7 @@ import (
 	"github.com/HumanInitiative/agent-harness-go/internal/adapters/inbound/httpapi"
 	"github.com/HumanInitiative/agent-harness-go/internal/adapters/outbound/genkitmodel"
 	"github.com/HumanInitiative/agent-harness-go/internal/adapters/outbound/memory"
+	"github.com/HumanInitiative/agent-harness-go/internal/adapters/outbound/redisstore"
 	"github.com/HumanInitiative/agent-harness-go/internal/adapters/outbound/tools"
 	"github.com/HumanInitiative/agent-harness-go/internal/application/agent"
 	"github.com/HumanInitiative/agent-harness-go/internal/bootstrap"
@@ -74,14 +75,11 @@ func run() error {
 		return fmt.Errorf("initialize model adapter: %w", err)
 	}
 
-	conversations, err := memory.New(memory.Options{
-		MaxConversations:           cfg.MaxConversations,
-		MaxMessagesPerConversation: cfg.HistoryWindow + 2, // the window plus the turn being added
-		TTL:                        cfg.ConversationTTL,
-	})
+	conversations, turns, closeState, err := newConversationState(ctx, cfg, log)
 	if err != nil {
-		return fmt.Errorf("initialize conversation store: %w", err)
+		return err
 	}
+	defer closeState()
 
 	registeredTools := []outbound.ToolHandler{
 		tools.NewCurrentTimeTool(),
@@ -135,7 +133,7 @@ func run() error {
 		}
 	}
 
-	service, err := agent.NewService(model, conversations, registeredTools, agent.Config{
+	service, err := agent.NewService(model, conversations, turns, registeredTools, agent.Config{
 		SystemPrompt:    cfg.SystemPrompt,
 		MaxToolTurns:    cfg.MaxToolTurns,
 		HistoryWindow:   cfg.HistoryWindow,
@@ -206,4 +204,55 @@ func run() error {
 		log.Info("shutdown complete")
 		return nil
 	}
+}
+
+// turnClaimMargin is how long a Redis turn claim outlives the request timeout,
+// so a turn that runs to its limit still holds its claim until it ends.
+const turnClaimMargin = 15 * time.Second
+
+// newConversationState picks where conversations and turn claims live: Redis
+// when REDIS_URL is set (several instances can share them), process memory
+// otherwise. The two always go together; a shared store with an in-process
+// guard would let two instances run the same conversation at once.
+func newConversationState(ctx context.Context, cfg config.Config, log *slog.Logger) (outbound.ConversationStore, outbound.TurnGuard, func(), error) {
+	maxMessages := cfg.HistoryWindow + 2 // the window plus the turn being added
+
+	if cfg.RedisURL == "" {
+		store, err := memory.New(memory.Options{
+			MaxConversations:           cfg.MaxConversations,
+			MaxMessagesPerConversation: maxMessages,
+			TTL:                        cfg.ConversationTTL,
+		})
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("initialize conversation store: %w", err)
+		}
+		return store, memory.NewTurnGuard(), func() {}, nil
+	}
+
+	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	rdb, err := redisstore.Connect(connectCtx, cfg.RedisURL)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("connect to redis: %w", err)
+	}
+	closeRedis := func() { _ = rdb.Close() }
+	store, err := redisstore.NewConversationStore(rdb, redisstore.ConversationOptions{
+		MaxMessagesPerConversation: maxMessages,
+		TTL:                        cfg.ConversationTTL,
+		KeyPrefix:                  cfg.RedisKeyPrefix + "conv:",
+	})
+	if err != nil {
+		closeRedis()
+		return nil, nil, nil, fmt.Errorf("initialize conversation store: %w", err)
+	}
+	guard, err := redisstore.NewTurnGuard(rdb, redisstore.TurnGuardOptions{
+		TTL:       cfg.RequestTimeout + turnClaimMargin,
+		KeyPrefix: cfg.RedisKeyPrefix + "turn:",
+	})
+	if err != nil {
+		closeRedis()
+		return nil, nil, nil, fmt.Errorf("initialize turn guard: %w", err)
+	}
+	log.Info("conversation state in redis", "key_prefix", cfg.RedisKeyPrefix)
+	return store, guard, closeRedis, nil
 }
