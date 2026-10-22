@@ -127,6 +127,11 @@ type Match struct {
 	// LowConfidence is set when the extraction confidence is below the
 	// institution's minimum.
 	LowConfidence bool
+	// FocusMatch is set when at least one of the institution's focus areas
+	// is among the company's. A company can score on region or on having a
+	// proposal channel alone; callers that need a relevant company (a
+	// shortlist for one program) require this too.
+	FocusMatch bool
 }
 
 // Score rates how well a company's CSR profile fits the institution. The
@@ -154,6 +159,7 @@ func (ip InstitutionProfile) Score(c Company, p *Profile) Match {
 		}
 	}
 	if len(matched) > 0 {
+		m.FocusMatch = true
 		add(min(45, 25+10*(len(matched)-1)), "bidang fokus cocok: "+strings.Join(matched, "; "))
 	}
 
