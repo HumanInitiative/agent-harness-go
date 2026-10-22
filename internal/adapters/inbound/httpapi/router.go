@@ -29,6 +29,9 @@ type RouterConfig struct {
 	// RateLimitPerMinute and RateLimitBurst configure the per-key limit.
 	RateLimitPerMinute int
 	RateLimitBurst     int
+	// Reports serves POST /api/v1/reports. Nil leaves the endpoint
+	// unmounted (404), which is how the report feature stays off.
+	Reports *ReportHandler
 }
 
 // NewRouter builds the complete HTTP router.
@@ -79,6 +82,9 @@ func NewRouter(chat *ChatHandler, log *slog.Logger, cfg RouterConfig) (http.Hand
 		api.Use(limiter.Middleware)
 		api.Use(Timeout(cfg.RequestTimeout))
 		api.Method(http.MethodPost, "/chat", chat)
+		if cfg.Reports != nil {
+			api.Method(http.MethodPost, "/reports", cfg.Reports)
+		}
 	})
 
 	if cfg.SwaggerEnabled {

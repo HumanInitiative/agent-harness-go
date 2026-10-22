@@ -55,6 +55,10 @@ definitions:
         - model_unavailable
         - timeout
         - client_closed_request
+        - program_not_found
+        - document_not_found
+        - no_documents
+        - narrative_failed
         example: invalid_request
         type: string
       error:
@@ -67,6 +71,59 @@ definitions:
           reporting a problem.
         example: 5b1f6c9e-7a0d-4c7e-8f5e-2d9a1c3b4e6f
         type: string
+    type: object
+  httpapi.ReportRequest:
+    properties:
+      documents:
+        description: |-
+          Documents restricts the report to these activity documents (file
+          names). Omit it to use every document of the program.
+        example:
+        - laporan-q1.pdf
+        items:
+          type: string
+        type: array
+      format:
+        description: |-
+          Format is "json" (default: the draft as Markdown in the response) or
+          "docx" (the draft as a Word file).
+        enum:
+        - json
+        - docx
+        example: json
+        type: string
+      from:
+        description: |-
+          From and To are the first and last day of the period, YYYY-MM-DD,
+          inclusive.
+        example: "2026-01-01"
+        type: string
+      program_id:
+        description: ProgramID is the program the report is about.
+        example: sample-program
+        type: string
+      to:
+        example: "2026-03-31"
+        type: string
+    type: object
+  httpapi.ReportResponse:
+    properties:
+      markdown:
+        description: Markdown is the draft report.
+        type: string
+      notes:
+        description: |-
+          Notes are things the reviewer must check before the draft goes out,
+          for example a number the activity documents do not contain. The same
+          notes are written into the draft.
+        items:
+          type: string
+        type: array
+      sources:
+        description: Sources are the activity documents the narrative sections cite.
+        items:
+          type: string
+        type: array
     type: object
   httpapi.StatusResponse:
     properties:
@@ -167,6 +224,75 @@ paths:
       summary: Send a message to the agent
       tags:
       - agent
+  /api/v1/reports:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Builds a draft donation report for one program and period. Figures come from the donation
+        data; the narrative sections are written by the model from the program's activity
+        documents and cite them. The draft always needs human review: notes lists what to check.
+        With format "docx" the response is the Word file instead of JSON.
+      parameters:
+      - description: Report request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.ReportRequest'
+      produces:
+      - application/json
+      - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      responses:
+        "200":
+          description: format docx
+          schema:
+            type: file
+        "400":
+          description: 'invalid_request: malformed body, bad date, unknown format'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "401":
+          description: 'unauthorized: missing or invalid X-API-Key'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "404":
+          description: program_not_found or document_not_found
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "413":
+          description: request_too_large
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "422":
+          description: 'no_documents: the program has no readable activity documents'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "429":
+          description: 'rate_limited: see Retry-After header'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "500":
+          description: internal_error
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "502":
+          description: 'narrative_failed: the model gave no usable narrative'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "503":
+          description: 'model_unavailable: see Retry-After header'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "504":
+          description: timeout
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Draft a donation report
+      tags:
+      - reports
   /healthz:
     get:
       produces:

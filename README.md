@@ -157,6 +157,16 @@ fingerprint of the key, never the key itself) to the request context. Every
 retrieves every log line of a request: access log, service, and tool calls.
 Message contents, tool arguments, and tool results are never logged.
 
+### Donation reports
+
+Behind `REPORT_TOOLS_ENABLED`, `POST /api/v1/reports` drafts a donation
+report for a program and period: figures from the donation data, narrative
+sections written by the model from the program's activity documents and
+checked against them, returned as JSON or a `.docx`. Data and documents come
+from the donation data API (`REPORT_API_URL`); until it exists, `make mock-api`
+serves invented ones ([contract](docs/donation-data-api.md)). See
+[docs/donation-report-template.md](docs/donation-report-template.md).
+
 ### Adding a tool
 
 1. Implement `outbound.ToolHandler` in `internal/adapters/outbound/tools/`

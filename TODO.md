@@ -48,119 +48,84 @@ document-level deduplication. See
       companies using .com. Detecting it needs the homepage content (a
       site about many countries).
 
-## Pilot 1: donation reporting agent (skeleton)
+## Pilot 1: donation reporting agent
 
 Goal: a program team picks a program and a period and gets a draft report
-to review. Figures come from an API endpoint; the narrative sections are
-written by the model from the activity reports (docx or pdf) of that
-program. Project-level plan and owners:
-the shared TODO document ("TODO Proyek Agentic AI & DevOps").
+to review. Figures come from the donation data; the narrative sections are
+written by the model from the program's activity reports (pdf, docx) and
+cite them. Project-level plan and owners: the shared TODO document ("TODO
+Proyek Agentic AI & DevOps"). How it works, the endpoint and the layout:
+[docs/donation-report-template.md](docs/donation-report-template.md).
 
-This stage only lays out the skeleton and the document template so the
-rest of the work can be sized. No real data and no model calls yet.
+The flow is built end to end and tested with a fake model:
+`POST /api/v1/reports` (behind `REPORT_TOOLS_ENABLED`) returns the draft as
+JSON or as a `.docx`. Figures and activity documents are read over HTTP from
+a mock of the donation API (`make mock-api`, `REPORT_API_URL`; contract in
+[docs/donation-data-api.md](docs/donation-data-api.md)). What is left needs
+the real donation API, a Gemini key and the program team. Rule that shapes everything: **figures are
+filled by code from the donation data, never written by the model.**
 
-How the pieces fit:
+### Working defaults to confirm
 
-```
-program + period
-   |-- report data client --> API endpoint --> typed figures (JSON)
-   |-- activity documents (docx / pdf) --> text --> model --> narrative
-   `-- template: fixed layout, figures filled by code, narrative slots
-                          |
-                          v
-                 draft DOCX / PDF  -->  human review
-```
+These were chosen to get the flow working; each is cheap to change.
 
-Rule that shapes everything: **figures are filled by code from the
-endpoint response, never written by the model**. The model only writes the
-narrative slots, and only from the supplied documents.
+- [ ] Activity documents live in a folder per program
+      (`REPORT_DOCS_DIR/<program id>/`). Confirm with the program team who
+      puts files there, or replace the adapter with an upload or a document
+      store behind `outbound.ActivityDocuments`.
+- [ ] The report is generated in code and rendered to `.docx` in-process
+      (no Python sidecar). If the team wants to edit the template layout
+      themselves, switch to a `.docx` template with placeholders. PDF output
+      is not built (convert the `.docx`, or add a renderer).
+- [ ] Section list and order, confirmed by the program team (see the
+      template document). Headings are English; the report is for Indonesian
+      readers, so decide whether to translate them.
+- [ ] Who receives the report (individual donor, corporate donor, internal);
+      it sets the tone in the prompt
+      (`internal/application/reporting/narrative.go`).
 
-### Decide first
+### Needs the donation API owner
 
-- [ ] Get the endpoint contract from whoever owns the donation API: URL,
-      auth, parameters (program, period), response fields, and one sample
-      response per program. Without it the template fields below are guesses.
-- [ ] Decide how activity documents reach the agent: uploaded with the
-      request, a folder or storage path per program and period, or an
-      endpoint that lists them. Decide the maximum size and count.
-- [ ] Decide the template format: a `.docx` with placeholders (editable by
-      the program team, rendered by filling it) or Markdown rendered to
-      DOCX/PDF. This also decides whether the render step is Go or a
-      Python sidecar (an ADR is already planned for the sidecar).
-- [ ] Decide who receives the report (individual donor, corporate donor,
-      internal), since it sets tone and which sections are required.
+- [ ] Show the owner the proposed contract
+      ([docs/donation-data-api.md](docs/donation-data-api.md)) and get their
+      real endpoints, auth, fields and one sample response per program; then
+      either they match it or `internal/adapters/outbound/reportapi` is
+      adjusted. Until then everything runs against the mock.
+- [ ] Point `REPORT_API_URL` / `REPORT_API_KEY` at the real API and compare
+      a report's figures with the donation system by hand.
+- [ ] Read-only access for the harness, and permission to send activity
+      text (not donor data) to the model.
 
-**Done when:** the four decisions are written down (an ADR or a short
-note in `docs/`) and the sample responses are in the repo as fixtures.
+**Done when:** a request for a real program and period returns figures that
+match the donation system, and the activity documents are the program's real
+reports.
 
-### Document template and sections
+### Needs a Gemini key and past reports
 
-- [ ] Write the section list with the program team and fix it in
-      `docs/donation-report-template.md`. Starting proposal:
-      1. Cover: program, period, report date, status "DRAFT".
-      2. Summary: funds received, funds disbursed, balance, beneficiaries
-         (figures, filled by code).
-      3. Funds received: table by month or source (figures).
-      4. Funds disbursed: table by category (figures).
-      5. Beneficiaries: count by group and region (figures).
-      6. Activities and impact: narrative written by the model from the
-         activity documents, with the source document named per paragraph.
-      7. Challenges and next steps: narrative, same rule.
-      8. Appendix: list of source documents and the data timestamp.
-- [ ] Mark each section as `figures` (code only) or `narrative` (model),
-      and list the placeholder names (`{{total_received}}`, ...).
-- [ ] Build the template file with placeholders and sample data, so a
-      filled example can be opened and judged before any code exists.
-- [ ] Put a visible "AI-generated draft, review before sending" note in the
-      template, and an empty "Reviewed by / date" line.
-
-**Done when:** a program team member has looked at the filled sample and
-agreed the layout and sections.
-
-### Code skeleton
-
-- [ ] Outbound port `ReportDataSource` (get figures for program + period)
-      with an HTTP adapter under `internal/adapters/outbound/`, behind a
-      base URL and key from config; a fake for tests. The application layer
-      must not import the HTTP client (see the dependency rule in
-      CONTRIBUTING.md).
-- [ ] Outbound port for reading activity documents and a text extractor:
-      pdf through the existing `pdftotext` path, docx extracted without
-      shelling out if a small Go library does it (decide in the PR).
-- [ ] Tool `get_report_figures` returning the typed figures, registered in
-      `registeredTools` in `cmd/harness/main.go` behind a new
-      `REPORT_TOOLS_ENABLED` flag, with unit tests ("Adding a tool" in
-      README.md).
-- [ ] Tool `read_activity_documents` returning bounded text per document
-      with the file name, so the model can cite it. Long documents are cut
-      to a token budget, as the CSR report reader does.
-- [ ] Report assembler (plain code, not a tool): takes figures plus the
-      model's narrative slots and fills the template. Fails if a figure
-      placeholder is empty or a narrative slot has no source cited.
-- [ ] Render step (`/render` sidecar or in-process, per the ADR): filled
-      template to DOCX and PDF. Contract written as OpenAPI first if it is
-      a sidecar.
-- [ ] Endpoint or agent entry point: `POST` with program and period,
-      returns the draft file. Add to Swagger.
-
-**Done when:** one request with fake data and a fake model returns a DOCX
-that matches the sample template, and `make ci` is green.
-
-### Narrative guardrails
-
-- [ ] Prompt for the narrative slots: use only the supplied documents, say
-      "not stated in the documents" instead of filling gaps, no figures in
-      narrative unless they appear in the figures payload.
-- [ ] Check after generation: every number in a narrative slot appears in
-      the figures or in a cited document; otherwise flag the slot.
-- [ ] Mask donor personal data before anything is sent to the model; the
-      narrative never needs donor names.
+- [ ] Try the narrative with the real model on 5 to 10 past reports and read
+      the output: tone, language, invented facts, whether the number check
+      flags the right things. Tune the prompt.
 - [ ] Eval set: 20 to 30 cases from past reports (program, period, expected
-      figures, a reference narrative). Figures must match 100%.
+      figures, a reference narrative). Figures must match 100%; narrative
+      reviewed by the Penanggung Jawab, target 80% accepted.
+- [ ] Install `pdftotext` (poppler-utils) in the deployed image: without it
+      PDFs are skipped with a note in the draft. A scanned PDF has no text
+      and is skipped with a note too (OCR is out of scope).
+- [ ] Check cost and time of one report; adjust `reporting.DefaultConfig`
+      (documents, characters) and `REQUEST_TIMEOUT_SECONDS`.
 
-**Done when:** the eval runs with a real Gemini key on at least five past
-reports and the failures are listed and reviewed by a person.
+**Done when:** the eval has run on at least five past reports and a person
+has reviewed the failures.
 
+### Later
+
+- [ ] Entry point for users: a small internal page or form that lists
+      programs, takes a period and downloads the `.docx`.
+- [ ] Audit log of drafts (who asked, program, period, documents used).
+- [ ] Mask donor names, not only contact details (`report.MaskPersonalData`
+      handles emails, phone numbers and national IDs only).
+
+## Decisions and data waiting on people
 
 - [ ] Replace the example values in `config/institution-profile.yaml` with
       Human Initiative's real focus areas, regions and program types: every
