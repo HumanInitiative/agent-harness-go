@@ -1,0 +1,474 @@
+[
+ {
+  "id": "pangan-jakarta",
+  "name": "Bantuan Pangan Jakarta",
+  "transactions": [
+   {
+    "date": "2026-01-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 45000000
+   },
+   {
+    "date": "2026-02-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 40000000
+   },
+   {
+    "date": "2026-03-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 50000000
+   },
+   {
+    "date": "2026-04-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 42000000
+   },
+   {
+    "date": "2026-05-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 48000000
+   },
+   {
+    "date": "2026-06-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 55000000
+   },
+   {
+    "date": "2026-01-15",
+    "kind": "received",
+    "label": "Donatur korporat",
+    "rupiah": 30000000
+   },
+   {
+    "date": "2026-03-15",
+    "kind": "received",
+    "label": "Donatur korporat",
+    "rupiah": 60000000
+   },
+   {
+    "date": "2026-04-15",
+    "kind": "received",
+    "label": "Donatur korporat",
+    "rupiah": 25000000
+   },
+   {
+    "date": "2026-06-15",
+    "kind": "received",
+    "label": "Donatur korporat",
+    "rupiah": 70000000
+   },
+   {
+    "date": "2026-02-15",
+    "kind": "received",
+    "label": "Kampanye daring",
+    "rupiah": 15000000
+   },
+   {
+    "date": "2026-05-15",
+    "kind": "received",
+    "label": "Kampanye daring",
+    "rupiah": 20000000
+   },
+   {
+    "date": "2026-01-15",
+    "kind": "disbursed",
+    "label": "Paket pangan",
+    "rupiah": 55000000
+   },
+   {
+    "date": "2026-02-15",
+    "kind": "disbursed",
+    "label": "Paket pangan",
+    "rupiah": 52000000
+   },
+   {
+    "date": "2026-03-15",
+    "kind": "disbursed",
+    "label": "Paket pangan",
+    "rupiah": 70000000
+   },
+   {
+    "date": "2026-04-15",
+    "kind": "disbursed",
+    "label": "Paket pangan",
+    "rupiah": 60000000
+   },
+   {
+    "date": "2026-05-15",
+    "kind": "disbursed",
+    "label": "Paket pangan",
+    "rupiah": 65000000
+   },
+   {
+    "date": "2026-06-15",
+    "kind": "disbursed",
+    "label": "Paket pangan",
+    "rupiah": 90000000
+   },
+   {
+    "date": "2026-01-15",
+    "kind": "disbursed",
+    "label": "Distribusi dan logistik",
+    "rupiah": 8000000
+   },
+   {
+    "date": "2026-02-15",
+    "kind": "disbursed",
+    "label": "Distribusi dan logistik",
+    "rupiah": 8000000
+   },
+   {
+    "date": "2026-03-15",
+    "kind": "disbursed",
+    "label": "Distribusi dan logistik",
+    "rupiah": 10000000
+   },
+   {
+    "date": "2026-04-15",
+    "kind": "disbursed",
+    "label": "Distribusi dan logistik",
+    "rupiah": 9000000
+   },
+   {
+    "date": "2026-05-15",
+    "kind": "disbursed",
+    "label": "Distribusi dan logistik",
+    "rupiah": 9000000
+   },
+   {
+    "date": "2026-06-15",
+    "kind": "disbursed",
+    "label": "Distribusi dan logistik",
+    "rupiah": 12000000
+   },
+   {
+    "date": "2026-01-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 6000000
+   },
+   {
+    "date": "2026-02-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 6000000
+   },
+   {
+    "date": "2026-03-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 6000000
+   },
+   {
+    "date": "2026-04-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 6000000
+   },
+   {
+    "date": "2026-05-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 6000000
+   },
+   {
+    "date": "2026-06-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 6000000
+   }
+  ],
+  "beneficiaries": [
+   {
+    "date": "2026-01-20",
+    "group": "Keluarga",
+    "people": 410
+   },
+   {
+    "date": "2026-02-20",
+    "group": "Keluarga",
+    "people": 390
+   },
+   {
+    "date": "2026-03-20",
+    "group": "Keluarga",
+    "people": 520
+   },
+   {
+    "date": "2026-04-20",
+    "group": "Keluarga",
+    "people": 450
+   },
+   {
+    "date": "2026-05-20",
+    "group": "Keluarga",
+    "people": 480
+   },
+   {
+    "date": "2026-06-20",
+    "group": "Keluarga",
+    "people": 600
+   },
+   {
+    "date": "2026-01-20",
+    "group": "Anak",
+    "people": 640
+   },
+   {
+    "date": "2026-02-20",
+    "group": "Anak",
+    "people": 610
+   },
+   {
+    "date": "2026-03-20",
+    "group": "Anak",
+    "people": 780
+   },
+   {
+    "date": "2026-04-20",
+    "group": "Anak",
+    "people": 700
+   },
+   {
+    "date": "2026-05-20",
+    "group": "Anak",
+    "people": 720
+   },
+   {
+    "date": "2026-06-20",
+    "group": "Anak",
+    "people": 900
+   }
+  ]
+ },
+ {
+  "id": "sekolah-desa",
+  "name": "Sekolah untuk Desa",
+  "transactions": [
+   {
+    "date": "2026-01-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 20000000
+   },
+   {
+    "date": "2026-02-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 20000000
+   },
+   {
+    "date": "2026-03-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 20000000
+   },
+   {
+    "date": "2026-04-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 20000000
+   },
+   {
+    "date": "2026-05-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 20000000
+   },
+   {
+    "date": "2026-06-15",
+    "kind": "received",
+    "label": "Donatur individu",
+    "rupiah": 20000000
+   },
+   {
+    "date": "2026-03-15",
+    "kind": "received",
+    "label": "Donatur korporat",
+    "rupiah": 100000000
+   },
+   {
+    "date": "2026-06-15",
+    "kind": "received",
+    "label": "Donatur korporat",
+    "rupiah": 100000000
+   },
+   {
+    "date": "2026-01-15",
+    "kind": "disbursed",
+    "label": "Perlengkapan sekolah",
+    "rupiah": 10000000
+   },
+   {
+    "date": "2026-02-15",
+    "kind": "disbursed",
+    "label": "Perlengkapan sekolah",
+    "rupiah": 12000000
+   },
+   {
+    "date": "2026-03-15",
+    "kind": "disbursed",
+    "label": "Perlengkapan sekolah",
+    "rupiah": 60000000
+   },
+   {
+    "date": "2026-04-15",
+    "kind": "disbursed",
+    "label": "Perlengkapan sekolah",
+    "rupiah": 10000000
+   },
+   {
+    "date": "2026-05-15",
+    "kind": "disbursed",
+    "label": "Perlengkapan sekolah",
+    "rupiah": 12000000
+   },
+   {
+    "date": "2026-06-15",
+    "kind": "disbursed",
+    "label": "Perlengkapan sekolah",
+    "rupiah": 60000000
+   },
+   {
+    "date": "2026-01-15",
+    "kind": "disbursed",
+    "label": "Honor guru pendamping",
+    "rupiah": 15000000
+   },
+   {
+    "date": "2026-02-15",
+    "kind": "disbursed",
+    "label": "Honor guru pendamping",
+    "rupiah": 15000000
+   },
+   {
+    "date": "2026-03-15",
+    "kind": "disbursed",
+    "label": "Honor guru pendamping",
+    "rupiah": 15000000
+   },
+   {
+    "date": "2026-04-15",
+    "kind": "disbursed",
+    "label": "Honor guru pendamping",
+    "rupiah": 15000000
+   },
+   {
+    "date": "2026-05-15",
+    "kind": "disbursed",
+    "label": "Honor guru pendamping",
+    "rupiah": 15000000
+   },
+   {
+    "date": "2026-06-15",
+    "kind": "disbursed",
+    "label": "Honor guru pendamping",
+    "rupiah": 15000000
+   },
+   {
+    "date": "2026-01-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 3000000
+   },
+   {
+    "date": "2026-02-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 3000000
+   },
+   {
+    "date": "2026-03-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 3000000
+   },
+   {
+    "date": "2026-04-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 3000000
+   },
+   {
+    "date": "2026-05-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 3000000
+   },
+   {
+    "date": "2026-06-15",
+    "kind": "disbursed",
+    "label": "Operasional",
+    "rupiah": 3000000
+   }
+  ],
+  "beneficiaries": [
+   {
+    "date": "2026-01-20",
+    "group": "Siswa",
+    "people": 150
+   },
+   {
+    "date": "2026-02-20",
+    "group": "Siswa",
+    "people": 150
+   },
+   {
+    "date": "2026-03-20",
+    "group": "Siswa",
+    "people": 160
+   },
+   {
+    "date": "2026-04-20",
+    "group": "Siswa",
+    "people": 160
+   },
+   {
+    "date": "2026-05-20",
+    "group": "Siswa",
+    "people": 165
+   },
+   {
+    "date": "2026-06-20",
+    "group": "Siswa",
+    "people": 170
+   },
+   {
+    "date": "2026-01-20",
+    "group": "Guru pendamping",
+    "people": 12
+   },
+   {
+    "date": "2026-02-20",
+    "group": "Guru pendamping",
+    "people": 12
+   },
+   {
+    "date": "2026-03-20",
+    "group": "Guru pendamping",
+    "people": 12
+   },
+   {
+    "date": "2026-04-20",
+    "group": "Guru pendamping",
+    "people": 14
+   },
+   {
+    "date": "2026-05-20",
+    "group": "Guru pendamping",
+    "people": 14
+   },
+   {
+    "date": "2026-06-20",
+    "group": "Guru pendamping",
+    "people": 14
+   }
+  ]
+ }
+]
