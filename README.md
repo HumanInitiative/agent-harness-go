@@ -293,4 +293,7 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
   Downloaded reports pass through the temporary directory (up to
   `CSR_CRAWL_MAX_PDF_BYTES` each, one per crawl worker).
 
+On AWS EC2 (one instance, Docker Compose, automatic HTTPS, and why Swarm or
+Kubernetes are not needed), see [docs/deployment-ec2.md](docs/deployment-ec2.md).
+
 Without compose: `docker build -t agent-harness-go . && docker run --rm -p 8080:8080 --env-file .env agent-harness-go`.

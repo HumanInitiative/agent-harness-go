@@ -1,0 +1,32 @@
+# Override that puts Caddy (automatic HTTPS) in front of the harness.
+# Use it together with the base file; see docs/deployment-ec2.md:
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/ec2/docker-compose.caddy.yml \
+#     --env-file .env up -d --build
+#
+# Needs HARNESS_DOMAIN in .env, and Docker Compose v2.24 or newer (for !override).
+services:
+  harness:
+    # The base file publishes 8080 to everyone. Behind Caddy it is reached
+    # over the compose network only, so drop the published port.
+    ports: !override []
+
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      HARNESS_DOMAIN: ${HARNESS_DOMAIN:?set HARNESS_DOMAIN in .env (e.g. harness.example.org)}
+    volumes:
+      - ./ec2/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates; losing this volume only means asking Let's Encrypt again.
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - harness
+    restart: unless-stopped
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}

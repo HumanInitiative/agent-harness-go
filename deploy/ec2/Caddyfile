@@ -1,0 +1,7 @@
+# TLS termination for the harness on a single EC2 host. Caddy gets and renews
+# a Let's Encrypt certificate by itself; HARNESS_DOMAIN must already resolve
+# to this server's Elastic IP, and ports 80 and 443 must be open.
+{$HARNESS_DOMAIN} {
+	encode gzip
+	reverse_proxy harness:8080
+}
