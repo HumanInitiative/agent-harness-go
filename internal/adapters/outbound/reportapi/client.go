@@ -142,6 +142,32 @@ func (c *Client) Figures(ctx context.Context, req report.Request) (report.Figure
 	return f, nil
 }
 
+// Programs implements outbound.ProgramCatalog.
+func (c *Client) Programs(ctx context.Context) ([]report.Program, error) {
+	body, status, err := c.get(ctx, c.base+"/v1/programs", maxJSONBytes)
+	if err != nil {
+		return nil, fmt.Errorf("programs: %w", err)
+	}
+	if status != http.StatusOK {
+		return nil, statusError("programs", status, body)
+	}
+	var listed []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(body, &listed); err != nil {
+		return nil, fmt.Errorf("programs: response is not the expected JSON: %w", err)
+	}
+	out := make([]report.Program, 0, len(listed))
+	for _, p := range listed {
+		if strings.TrimSpace(p.ID) == "" || strings.TrimSpace(p.Name) == "" {
+			return nil, errors.New("programs: the API listed a program without an id or a name")
+		}
+		out = append(out, report.Program{ID: p.ID, Name: p.Name})
+	}
+	return out, nil
+}
+
 type documentJSON struct {
 	Name string `json:"name"`
 }

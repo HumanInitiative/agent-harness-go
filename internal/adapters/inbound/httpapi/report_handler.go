@@ -110,6 +110,30 @@ func (h *ReportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(file.Data) // the status is sent; a write error is a gone client
 }
 
+// Programs handles GET /api/v1/programs.
+//
+//	@Summary	List the programs a report can be made for
+//	@Tags		reports
+//	@Produce	json
+//	@Security	ApiKeyAuth
+//	@Success	200	{array}		ProgramDTO
+//	@Failure	401	{object}	ErrorResponse	"unauthorized: missing or invalid X-API-Key"
+//	@Failure	429	{object}	ErrorResponse	"rate_limited: see Retry-After header"
+//	@Failure	500	{object}	ErrorResponse	"internal_error"
+//	@Router		/api/v1/programs [get]
+func (h *ReportHandler) Programs(w http.ResponseWriter, r *http.Request) {
+	programs, err := h.service.Programs(r.Context())
+	if err != nil {
+		h.writeReportError(w, r, err)
+		return
+	}
+	out := make([]ProgramDTO, len(programs))
+	for i, p := range programs {
+		out[i] = ProgramDTO{ID: p.ID, Name: p.Name}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (h *ReportHandler) writeReportError(w http.ResponseWriter, r *http.Request, err error) {
 	ctx := r.Context()
 	switch {

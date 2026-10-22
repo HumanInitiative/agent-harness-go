@@ -57,10 +57,11 @@ unknown program (the harness treats it as no documents).
 The file itself (at most 50 MB), with its content type. `404` if the
 program has no such document.
 
-## `GET /v1/programs` (mock only)
+## `GET /v1/programs`
 
-`[{"id": "...", "name": "..."}]`, to see which programs the mock serves. The
-harness does not call it; a later program picker will.
+`[{"id": "...", "name": "..."}]`: the programs a report can be made for. The
+harness shows them in the page at `/reports` so a person picks one instead of
+typing an id. Both fields are required.
 
 ## The mock
 

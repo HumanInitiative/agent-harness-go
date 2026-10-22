@@ -89,3 +89,11 @@ type ReportResponse struct {
 	// Sources are the activity documents the narrative sections cite.
 	Sources []string `json:"sources"`
 }
+
+// ProgramDTO is one program a report can be made for.
+type ProgramDTO struct {
+	// ID is what ReportRequest.program_id takes.
+	ID string `json:"id" example:"pangan-jakarta"`
+	// Name is the program's name, for people.
+	Name string `json:"name" example:"Bantuan Pangan Jakarta"`
+}

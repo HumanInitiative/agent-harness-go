@@ -75,6 +75,23 @@ report, 30,000 per document. Emails, mobile numbers and 16-digit ID numbers
 are replaced with placeholders before the text goes to the model; names are
 not masked.
 
+## The page for the program team
+
+`/reports` on the harness is a small page: type the API key, pick a program
+and a period (the previous quarter by default), then preview the draft or
+download the Word file. Notes for the reviewer are shown above the draft. The
+page is static and holds no secret; it needs no login of its own, but every
+call it makes needs the API key, which it keeps only for the browser tab. It
+is served only when `REPORT_TOOLS_ENABLED=true`. The page is in Indonesian;
+the draft it shows is still English (see "Not decided yet").
+
+## Audit trail
+
+Every successful draft writes one log line, "report drafted": the key
+fingerprint of the caller, the program, the period, the documents read and
+the documents cited, and the number of reviewer notes. The text of the report
+and of the documents is never logged.
+
 ## Using it
 
 ```bash

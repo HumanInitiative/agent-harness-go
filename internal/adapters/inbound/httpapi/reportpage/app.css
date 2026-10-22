@@ -1,0 +1,88 @@
+:root {
+  --bg: #fafaf7;
+  --fg: #1c1b18;
+  --muted: #6a675f;
+  --line: #d9d5ca;
+  --accent: #1b5e45;
+  --accent-fg: #ffffff;
+  --warn-bg: #fff4d6;
+  --warn-line: #c58a00;
+  --error: #a3261f;
+  --surface: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161714;
+    --fg: #ecebe5;
+    --muted: #a09d93;
+    --line: #3a3933;
+    --accent: #5fbf97;
+    --accent-fg: #0e1a14;
+    --warn-bg: #3a2f10;
+    --warn-line: #d9a421;
+    --error: #ff8b82;
+    --surface: #1f201c;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 44rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+h1 { font-size: 1.5rem; margin: 0 0 .5rem; }
+h2 { font-size: 1.1rem; margin: 1.75rem 0 .5rem; }
+.lede, .hint { color: var(--muted); }
+.lede { margin: 0 0 1.5rem; }
+.hint { margin: .25rem 0 0; font-size: .875rem; }
+.field { margin-bottom: 1rem; flex: 1; }
+.row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.row .field { min-width: 10rem; }
+.inline { display: flex; gap: .5rem; }
+.inline input { flex: 1; min-width: 0; }
+label { display: block; font-weight: 600; margin-bottom: .25rem; }
+input, select, button { font: inherit; }
+input, select {
+  width: 100%;
+  padding: .5rem .625rem;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: .375rem;
+}
+button {
+  padding: .5rem 1rem;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: .375rem;
+  cursor: pointer;
+}
+button.secondary { color: var(--fg); background: transparent; border-color: var(--line); }
+button:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: .5rem; }
+#status { min-height: 1.5rem; margin: 1rem 0 0; color: var(--muted); }
+#status.error { color: var(--error); font-weight: 600; }
+.notes {
+  margin-top: 1.5rem;
+  padding: .75rem 1rem;
+  background: var(--warn-bg);
+  border-left: 4px solid var(--warn-line);
+  border-radius: .25rem;
+}
+.notes h2 { margin-top: 0; }
+.notes ul { margin: 0; padding-left: 1.25rem; }
+pre {
+  margin: 0;
+  padding: 1rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: .875rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: .375rem;
+}

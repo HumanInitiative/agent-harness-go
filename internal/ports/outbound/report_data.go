@@ -45,3 +45,9 @@ type DraftRenderer interface {
 	Extension() string
 	Render(d report.Draft) ([]byte, error)
 }
+
+// ProgramCatalog lists the programs a report can be made for, so a person
+// can pick one instead of typing an id.
+type ProgramCatalog interface {
+	Programs(ctx context.Context) ([]report.Program, error)
+}

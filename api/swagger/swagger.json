@@ -97,6 +97,51 @@
                 }
             }
         },
+        "/api/v1/programs": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "List the programs a report can be made for",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/httpapi.ProgramDTO"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: missing or invalid X-API-Key",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "rate_limited: see Retry-After header",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "internal_error",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/reports": {
             "post": {
                 "security": [
@@ -309,6 +354,21 @@
                     "description": "RequestID identifies the request in the server logs; include it when\nreporting a problem.",
                     "type": "string",
                     "example": "5b1f6c9e-7a0d-4c7e-8f5e-2d9a1c3b4e6f"
+                }
+            }
+        },
+        "httpapi.ProgramDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "description": "ID is what ReportRequest.program_id takes.",
+                    "type": "string",
+                    "example": "pangan-jakarta"
+                },
+                "name": {
+                    "description": "Name is the program's name, for people.",
+                    "type": "string",
+                    "example": "Bantuan Pangan Jakarta"
                 }
             }
         },

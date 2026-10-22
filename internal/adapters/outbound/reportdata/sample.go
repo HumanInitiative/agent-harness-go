@@ -55,3 +55,8 @@ func (s *Sample) Figures(_ context.Context, req report.Request) (report.Figures,
 		},
 	}, nil
 }
+
+// Programs lists the one program the sample source knows.
+func (s *Sample) Programs(context.Context) ([]report.Program, error) {
+	return []report.Program{{ID: SampleProgramID, Name: "Sample program (invented data)"}}, nil
+}

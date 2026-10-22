@@ -72,6 +72,17 @@ definitions:
         example: 5b1f6c9e-7a0d-4c7e-8f5e-2d9a1c3b4e6f
         type: string
     type: object
+  httpapi.ProgramDTO:
+    properties:
+      id:
+        description: ID is what ReportRequest.program_id takes.
+        example: pangan-jakarta
+        type: string
+      name:
+        description: Name is the program's name, for people.
+        example: Bantuan Pangan Jakarta
+        type: string
+    type: object
   httpapi.ReportRequest:
     properties:
       documents:
@@ -224,6 +235,34 @@ paths:
       summary: Send a message to the agent
       tags:
       - agent
+  /api/v1/programs:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/httpapi.ProgramDTO'
+            type: array
+        "401":
+          description: 'unauthorized: missing or invalid X-API-Key'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "429":
+          description: 'rate_limited: see Retry-After header'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "500":
+          description: internal_error
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List the programs a report can be made for
+      tags:
+      - reports
   /api/v1/reports:
     post:
       consumes:

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/HumanInitiative/agent-harness-go/internal/domain/report"
+	"github.com/HumanInitiative/agent-harness-go/internal/platform/caller"
 	"github.com/HumanInitiative/agent-harness-go/internal/ports/outbound"
 )
 
@@ -59,6 +60,7 @@ type Service struct {
 	data      outbound.ReportDataSource
 	docs      outbound.ActivityDocuments
 	model     outbound.ModelPort
+	catalog   outbound.ProgramCatalog // optional
 	renderers map[string]outbound.DraftRenderer
 	cfg       Config
 	log       *slog.Logger
@@ -82,6 +84,25 @@ func NewService(data outbound.ReportDataSource, docs outbound.ActivityDocuments,
 		byFormat[r.Format()] = r
 	}
 	return &Service{data: data, docs: docs, model: model, renderers: byFormat, cfg: cfg, log: log}, nil
+}
+
+// WithPrograms gives the service a catalog to list programs from. Without
+// one, Programs returns an empty list.
+func (s *Service) WithPrograms(catalog outbound.ProgramCatalog) *Service {
+	s.catalog = catalog
+	return s
+}
+
+// Programs lists the programs a report can be made for.
+func (s *Service) Programs(ctx context.Context) ([]report.Program, error) {
+	if s.catalog == nil {
+		return []report.Program{}, nil
+	}
+	programs, err := s.catalog.Programs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list programs: %w", err)
+	}
+	return programs, nil
 }
 
 // Input selects the report.
@@ -132,7 +153,16 @@ func (s *Service) Generate(ctx context.Context, in Input) (report.Draft, error) 
 	if err != nil {
 		return report.Draft{}, fmt.Errorf("%w: %v", ErrNarrativeRejected, err)
 	}
-	s.log.InfoContext(ctx, "report drafted", "program", in.ProgramID, "documents", len(docs), "review_notes", len(notes))
+	// The audit trail of drafts: who asked for what, and what it was built
+	// from. Never the text of the report or of the documents.
+	s.log.InfoContext(ctx, "report drafted",
+		"key_id", caller.KeyID(ctx),
+		"program", in.ProgramID,
+		"from", in.From.Format("2006-01-02"),
+		"to", in.To.Format("2006-01-02"),
+		"documents_read", documentNames(docs),
+		"documents_cited", draft.Sources,
+		"review_notes", len(notes))
 	return draft, nil
 }
 
@@ -199,6 +229,14 @@ func (s *Service) prepare(docs []report.Document) ([]report.Document, []string) 
 		out = append(out, d)
 	}
 	return out, notes
+}
+
+func documentNames(docs []report.Document) []string {
+	names := make([]string, len(docs))
+	for i, d := range docs {
+		names[i] = d.Name
+	}
+	return names
 }
 
 // checkNumbers flags every number in a narrative that neither the figures

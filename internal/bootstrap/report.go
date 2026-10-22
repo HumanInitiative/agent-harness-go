@@ -42,27 +42,29 @@ func NewReportStack(cfg config.ReportConfig, model outbound.ModelPort, log *slog
 	}
 
 	var (
-		data   outbound.ReportDataSource
-		docs   outbound.ActivityDocuments
-		source string
+		data    outbound.ReportDataSource
+		docs    outbound.ActivityDocuments
+		catalog outbound.ProgramCatalog
+		source  string
 	)
 	if cfg.APIURL != "" {
 		client, err := reportapi.New(reportapi.Config{BaseURL: cfg.APIURL, APIKey: cfg.APIKey, Timeout: cfg.APITimeout}, pdfExtractor, log)
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap: report API: %w", err)
 		}
-		data, docs, source = client, client, "donation data API "+cfg.APIURL
+		data, docs, catalog, source = client, client, client, "donation data API "+cfg.APIURL
 	} else {
 		dir, err := reportdocs.NewDir(cfg.DocsDir, pdfExtractor, log)
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap: report documents: %w", err)
 		}
-		data, docs, source = reportdata.NewSample(nil), dir, "built-in SAMPLE figures and folder "+cfg.DocsDir
+		sample := reportdata.NewSample(nil)
+		data, docs, catalog, source = sample, dir, sample, "built-in SAMPLE figures and folder "+cfg.DocsDir
 	}
 
 	svc, err := reporting.NewService(data, docs, model, []outbound.DraftRenderer{reportdocx.New()}, reporting.DefaultConfig(), log)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: report service: %w", err)
 	}
-	return &ReportStack{Service: svc, Data: data, Source: source}, nil
+	return &ReportStack{Service: svc.WithPrograms(catalog), Data: data, Source: source}, nil
 }

@@ -1,7 +1,9 @@
 package reporting_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -13,6 +15,7 @@ import (
 	"github.com/HumanInitiative/agent-harness-go/internal/adapters/outbound/reportdata"
 	"github.com/HumanInitiative/agent-harness-go/internal/application/reporting"
 	"github.com/HumanInitiative/agent-harness-go/internal/domain/report"
+	"github.com/HumanInitiative/agent-harness-go/internal/platform/caller"
 	"github.com/HumanInitiative/agent-harness-go/internal/ports/outbound"
 )
 
@@ -290,4 +293,64 @@ func sampleFigures() report.Figures {
 		Period:    report.Period{From: time.Now(), To: time.Now()},
 	})
 	return f
+}
+
+func TestGenerate_WritesAnAuditLine(t *testing.T) {
+	var logs bytes.Buffer
+	s, err := reporting.NewService(reportdata.NewSample(nil), fakeDocs{docs: []report.Document{q1Doc,
+		{Name: "tidak-dikutip.txt", Text: "RAHASIA-ISI-DOKUMEN 77"}}},
+		&scriptedModel{outputs: []string{goodAnswer}}, nil, reporting.DefaultConfig(), slog.New(slog.NewJSONHandler(&logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := caller.WithKeyID(context.Background(), "a1b2c3d4e5f6")
+	if _, err := s.Generate(ctx, input()); err != nil {
+		t.Fatal(err)
+	}
+
+	var line map[string]any
+	for _, raw := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+		var l map[string]any
+		if err := json.Unmarshal(raw, &l); err == nil && l["msg"] == "report drafted" {
+			line = l
+		}
+	}
+	if line == nil {
+		t.Fatalf("no audit line in:\n%s", logs.String())
+	}
+	if line["key_id"] != "a1b2c3d4e5f6" || line["program"] != reportdata.SampleProgramID ||
+		line["from"] != "2026-01-01" || line["to"] != "2026-03-31" {
+		t.Errorf("audit line = %v", line)
+	}
+	read, _ := line["documents_read"].([]any)
+	cited, _ := line["documents_cited"].([]any)
+	if len(read) != 2 || len(cited) != 1 || cited[0] != "laporan-q1.pdf" {
+		t.Errorf("documents_read = %v, documents_cited = %v", read, cited)
+	}
+	if strings.Contains(logs.String(), "RAHASIA-ISI-DOKUMEN") || strings.Contains(logs.String(), "paket pangan") {
+		t.Error("document or report text must never reach the log")
+	}
+}
+
+type fakeCatalog struct {
+	programs []report.Program
+	err      error
+}
+
+func (f fakeCatalog) Programs(context.Context) ([]report.Program, error) { return f.programs, f.err }
+
+func TestPrograms(t *testing.T) {
+	s := newService(t, fakeDocs{}, &scriptedModel{})
+	got, err := s.Programs(context.Background())
+	if err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("without a catalog: %#v, %v (want an empty, non-nil list)", got, err)
+	}
+	s.WithPrograms(fakeCatalog{programs: []report.Program{{ID: "a", Name: "A"}}})
+	if got, err := s.Programs(context.Background()); err != nil || len(got) != 1 || got[0].ID != "a" {
+		t.Fatalf("with a catalog: %v, %v", got, err)
+	}
+	s.WithPrograms(fakeCatalog{err: errors.New("down")})
+	if _, err := s.Programs(context.Background()); err == nil {
+		t.Fatal("catalog errors must surface")
+	}
 }

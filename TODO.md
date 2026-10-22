@@ -119,9 +119,19 @@ has reviewed the failures.
 
 ### Later
 
-- [ ] Entry point for users: a small internal page or form that lists
-      programs, takes a period and downloads the `.docx`.
-- [ ] Audit log of drafts (who asked, program, period, documents used).
+- [x] Entry point for users: the page at `/reports` lists programs (from
+      `GET /api/v1/programs`), takes a period and shows or downloads the
+      draft. Tried in headless Chrome against the mock API.
+- [ ] Show the page to the program team and adjust the wording and flow; it
+      is in Indonesian while the draft is not yet.
+- [ ] The page asks for the API key every time a tab opens. If that is too
+      clumsy for the team, decide on a login (single sign-on or per-user keys).
+- [x] Audit log of drafts: one "report drafted" log line per draft with key
+      fingerprint, program, period, documents read and cited. It is only a
+      log; keep it somewhere searchable once hosting is chosen.
+- [ ] A donation API that is down or rejects the key shows as "internal
+      server error"; give it its own error code (502) so people know it is
+      not their request.
 - [ ] Mask donor names, not only contact details (`report.MaskPersonalData`
       handles emails, phone numbers and national IDs only).
 

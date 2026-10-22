@@ -298,3 +298,86 @@ func TestReports_EndToEndOverHTTPWithTheMockAPI(t *testing.T) {
 	}
 	expectError(t, s.report(`{"program_id":"ghost","from":"2026-01-01","to":"2026-03-31"}`), http.StatusNotFound, "program_not_found")
 }
+
+type listPrograms []report.Program
+
+func (l listPrograms) Programs(context.Context) ([]report.Program, error) { return l, nil }
+
+func programsServer(t *testing.T, programs ...report.Program) testServer {
+	t.Helper()
+	return newTestServer(t, replyWith("unused"), func(cfg *httpapi.RouterConfig) {
+		log := slog.New(slog.NewTextHandler(io.Discard, nil))
+		svc, err := reporting.NewService(reportdata.NewSample(nil), reportDocs{}, replyWith("x"),
+			[]outbound.DraftRenderer{reportdocx.New()}, reporting.DefaultConfig(), log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Reports = httpapi.NewReportHandler(svc.WithPrograms(listPrograms(programs)), log)
+	})
+}
+
+func TestPrograms(t *testing.T) {
+	s := programsServer(t, report.Program{ID: "a", Name: "Program A"}, report.Program{ID: "b", Name: "Program B"})
+	expectError(t, s.do(http.MethodGet, "/api/v1/programs", "", ""), http.StatusUnauthorized, "unauthorized")
+
+	rec := s.do(http.MethodGet, "/api/v1/programs", testKey, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got []httpapi.ProgramDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != (httpapi.ProgramDTO{ID: "a", Name: "Program A"}) {
+		t.Errorf("programs = %+v", got)
+	}
+
+	if body := programsServer(t).do(http.MethodGet, "/api/v1/programs", testKey, "").Body.String(); strings.TrimSpace(body) != "[]" {
+		t.Errorf("no programs must be [], got %q", body)
+	}
+	expectError(t, newTestServer(t, replyWith("x")).do(http.MethodGet, "/api/v1/programs", testKey, ""), http.StatusNotFound, "not_found")
+}
+
+func TestReportPage(t *testing.T) {
+	s := programsServer(t)
+
+	// The page is public: it has to load before anyone has typed a key.
+	for path, contentType := range map[string]string{
+		"/reports":         "text/html; charset=utf-8",
+		"/reports/app.js":  "text/javascript; charset=utf-8",
+		"/reports/app.css": "text/css; charset=utf-8",
+	} {
+		rec := s.do(http.MethodGet, path, "", "")
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: status %d", path, rec.Code)
+			continue
+		}
+		if got := rec.Header().Get("Content-Type"); got != contentType {
+			t.Errorf("%s: Content-Type %q", path, got)
+		}
+		csp := rec.Header().Get("Content-Security-Policy")
+		if !strings.Contains(csp, "default-src 'none'") || !strings.Contains(csp, "frame-ancestors 'none'") || strings.Contains(csp, "unsafe") {
+			t.Errorf("%s: CSP %q", path, csp)
+		}
+		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: nosniff missing", path)
+		}
+	}
+
+	html := s.do(http.MethodGet, "/reports", "", "").Body.String()
+	for _, want := range []string{`lang="id"`, `/reports/app.js`, `/reports/app.css`, `id="program"`, `type="password"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+	// The CSP forbids inline script and style, so the page must not use them.
+	if strings.Contains(html, "<script>") || strings.Contains(html, "<style") || strings.Contains(html, " onclick=") {
+		t.Error("page uses inline script or style, which its CSP blocks")
+	}
+	if strings.Contains(s.do(http.MethodGet, "/reports/app.js", "", "").Body.String(), "innerHTML") {
+		t.Error("server text must go in through textContent, not innerHTML")
+	}
+
+	expectError(t, s.do(http.MethodGet, "/reports/other.js", "", ""), http.StatusNotFound, "not_found")
+	expectError(t, newTestServer(t, replyWith("x")).do(http.MethodGet, "/reports", "", ""), http.StatusNotFound, "not_found")
+}
