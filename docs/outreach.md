@@ -1,5 +1,9 @@
 # Funder shortlist and approach emails (pilot 2)
 
+> Untuk memahami alur dan kodenya langkah demi langkah, mulai dari
+> [panduan engineer pilot 2](pilots/pilot-2-shortlist-pendana.md). Halaman ini
+> adalah aturan produknya.
+
 From one Human Initiative program to the companies that may fund it: a
 shortlist from the CSR index, the reasons each fits, the evidence behind
 them, and a draft approach email per company for a person to read, adjust and

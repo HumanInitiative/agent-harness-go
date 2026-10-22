@@ -1,5 +1,9 @@
 # Donation reports
 
+> Untuk memahami alur dan kodenya langkah demi langkah, mulai dari
+> [panduan engineer pilot 1](pilots/pilot-1-laporan-donasi.md). Halaman ini
+> adalah isi dan aturan laporannya.
+
 How the donation report draft is made, what it contains, and who writes
 what. The code is in `internal/domain/report` (layout and checks),
 `internal/application/reporting` (the flow) and the adapters named below;
