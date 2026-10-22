@@ -162,7 +162,8 @@ Message contents, tool arguments, and tool results are never logged.
 [docs/pilots/](docs/pilots/README.md) is the engineer's guide to the two
 pilots below (in Indonesian): diagrams of the full flow matched to the Go
 functions that run each step, every command, configuration, and where to
-change what.
+change what. `make demo` runs both pilots on invented data with a fake model
+(no Gemini key), and `docs/pilots/praktik.md` is the step-by-step tutorial for it.
 
 ### Donation reports
 

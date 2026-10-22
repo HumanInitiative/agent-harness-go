@@ -6,6 +6,7 @@ Halaman ini menjelaskan dua hal yang saling bergantung: bagaimana **indeks CSR
 terisi** (Bagian A), dan bagaimana **shortlist dibuat dari indeks itu**
 (Bagian B), dengan fungsi Go yang menjalankan tiap langkah.
 
+Ingin langsung mencoba? Ikuti [praktik.md](praktik.md) (tanpa kunci Gemini).
 Baca [README panduan](README.md) dulu untuk peta arsitektur dan aturan
 dependensi. Aturan produk ada di [outreach.md](../outreach.md); detail crawl di
 [internal/websearch/csr/README.md](../../internal/websearch/csr/README.md).
