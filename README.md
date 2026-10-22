@@ -157,6 +157,13 @@ fingerprint of the key, never the key itself) to the request context. Every
 retrieves every log line of a request: access log, service, and tool calls.
 Message contents, tool arguments, and tool results are never logged.
 
+### The two pilots
+
+[docs/pilots/](docs/pilots/README.md) is the engineer's guide to the two
+pilots below (in Indonesian): diagrams of the full flow matched to the Go
+functions that run each step, every command, configuration, and where to
+change what.
+
 ### Donation reports
 
 Behind `REPORT_TOOLS_ENABLED`, `POST /api/v1/reports` drafts a donation
