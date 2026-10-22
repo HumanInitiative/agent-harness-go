@@ -4,6 +4,7 @@ Dari "program + periode" menjadi draf laporan untuk donor: **angka dari data
 donasi, narasi dari dokumen kegiatan**. Halaman ini menjelaskan alurnya
 langkah demi langkah, dengan fungsi Go yang menjalankan tiap langkah.
 
+Ingin langsung mencoba? Ikuti [praktik.md](praktik.md) (tanpa kunci Gemini).
 Baca [README panduan](README.md) dulu untuk peta arsitektur, aturan
 dependensi, dan cara menjalankan. Spesifikasi isi laporan ada di
 [donation-report-template.md](../donation-report-template.md), kontrak API

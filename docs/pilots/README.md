@@ -8,6 +8,7 @@ langkah punya tabel yang menunjuk file dan test-nya.
 | Dokumen | Isi |
 |---|---|
 | **halaman ini** | Peta arsitektur, aturan dependensi, cara menjalankan, semua perintah, konfigurasi, jalur baca kode |
+| [praktik.md](praktik.md) | **Mulai dari sini bila ingin mencoba**: tutorial langkah demi langkah dengan `make demo` (tanpa kunci Gemini), hasil yang diharapkan, dan uji pemahaman |
 | [pilot-1-laporan-donasi.md](pilot-1-laporan-donasi.md) | Alur lengkap laporan donasi, diagram, fungsi per langkah, debugging |
 | [pilot-2-shortlist-pendana.md](pilot-2-shortlist-pendana.md) | Pengisian indeks CSR, alur shortlist dan email, skor, debugging |
 
@@ -175,6 +176,7 @@ library mandiri yang tidak meng-import apa pun dari harness. Hanya adapter
 | `internal/adapters/outbound/hiprograms/` | Katalog program HI dari YAML |
 | `internal/adapters/outbound/genkitmodel/` | `ModelPort` lewat Genkit dan Gemini |
 | `internal/mockapi/` | Isi API donasi tiruan dan datanya |
+| `cmd/pilotdemo/` | Demo satu proses: API tiruan + indeks karangan + model palsu (`make demo`) |
 | `internal/websearch/csr/` | Indeks CSR: crawl, ekstraksi, skor, query |
 
 ## Apa yang terjadi saat harness menyala
@@ -229,6 +231,18 @@ Pemeriksaan konfigurasi yang membuat harness menolak start
 
 Ada dua tingkat. Yang pertama **tidak butuh kunci Gemini** dan cukup untuk
 memahami hampir semua kode.
+
+### Tingkat 0: demo satu perintah (disarankan untuk mulai)
+
+```bash
+make demo        # API donasi tiruan + indeks CSR karangan + model palsu, semuanya satu proses
+```
+
+Menjalankan **kedua pilot dengan kode yang sama dengan produksi**, hanya model
+dan sumber datanya yang palsu (semua tulisan model berawalan `[DEMO]`). Tutorial
+berurutan ada di [praktik.md](praktik.md). `make demo QUIRK=fake-email` (atau
+`invent-number`, `bad-json-once`) membuat model palsu berulah sekali, supaya
+pemeriksaan dan percobaan ulang terlihat bekerja. Kodenya di `cmd/pilotdemo/`.
 
 ### Tingkat 1: tanpa kunci Gemini
 
@@ -298,6 +312,7 @@ terisi. Tanpa itu jawabannya 422 `no_prospects` dengan alasan yang jelas.
 | `make build` | Binary statis ke `bin/harness` |
 | `make run` | Jalankan harness (`go run ./cmd/harness`) dengan env saat ini |
 | `make mock-api` | API donasi tiruan di `127.0.0.1:8090` |
+| `make demo` | Kedua pilot dengan data karangan dan model palsu, tanpa kunci ([praktik.md](praktik.md)) |
 
 ### csrctl (indeks CSR)
 
