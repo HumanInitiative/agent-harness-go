@@ -103,6 +103,19 @@ func run() error {
 			tools.NewWebFetchTool(web.Fetcher),
 		)
 	}
+	var reports *httpapi.ReportHandler
+	if cfg.Report.ToolsEnabled {
+		stack, err := bootstrap.NewReportStack(cfg.Report, model, log)
+		if err != nil {
+			return fmt.Errorf("initialize report feature: %w", err)
+		}
+		if cfg.Report.APIURL == "" {
+			log.Warn("report feature enabled with built-in SAMPLE data, not real donations (set REPORT_API_URL)")
+		}
+		registeredTools = append(registeredTools, tools.NewReportFiguresTool(stack.Data))
+		reports = httpapi.NewReportHandler(stack.Service, log)
+		log.Info("report endpoint enabled", "source", stack.Source, "formats", stack.Service.Formats())
+	}
 	if cfg.CSR.ToolsEnabled {
 		profile, err := bootstrap.LoadInstitutionProfile(cfg.CSR)
 		if err != nil {
@@ -150,6 +163,7 @@ func run() error {
 		APIKeys:            cfg.APIKeys,
 		RateLimitPerMinute: cfg.RateLimitPerMinute,
 		RateLimitBurst:     cfg.RateLimitBurst,
+		Reports:            reports,
 	})
 	if err != nil {
 		return fmt.Errorf("initialize router: %w", err)

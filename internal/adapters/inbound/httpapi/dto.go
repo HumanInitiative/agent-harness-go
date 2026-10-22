@@ -47,7 +47,7 @@ type ChatResponse struct {
 type ErrorResponse struct {
 	// Code is a stable, machine-readable error identifier. Clients should
 	// branch on Code, never on Error.
-	Code string `json:"code" example:"invalid_request" enums:"invalid_request,unauthorized,not_found,method_not_allowed,conversation_busy,request_too_large,rate_limited,tool_turn_limit,internal_error,model_unavailable,timeout,client_closed_request"`
+	Code string `json:"code" example:"invalid_request" enums:"invalid_request,unauthorized,not_found,method_not_allowed,conversation_busy,request_too_large,rate_limited,tool_turn_limit,internal_error,model_unavailable,timeout,client_closed_request,program_not_found,document_not_found,no_documents,narrative_failed"`
 	// Error is a human-readable explanation. Its wording may change.
 	Error string `json:"error" example:"invalid input: message must not be empty"`
 	// RequestID identifies the request in the server logs; include it when
@@ -58,4 +58,34 @@ type ErrorResponse struct {
 // StatusResponse is the body returned by the health endpoints.
 type StatusResponse struct {
 	Status string `json:"status" example:"ok"`
+}
+
+// ReportRequest is the payload for POST /api/v1/reports. Unknown fields
+// are rejected.
+type ReportRequest struct {
+	// ProgramID is the program the report is about.
+	ProgramID string `json:"program_id" example:"sample-program"`
+	// From and To are the first and last day of the period, YYYY-MM-DD,
+	// inclusive.
+	From string `json:"from" example:"2026-01-01"`
+	To   string `json:"to" example:"2026-03-31"`
+	// Documents restricts the report to these activity documents (file
+	// names). Omit it to use every document of the program.
+	Documents []string `json:"documents,omitempty" example:"laporan-q1.pdf"`
+	// Format is "json" (default: the draft as Markdown in the response) or
+	// "docx" (the draft as a Word file).
+	Format string `json:"format,omitempty" example:"json" enums:"json,docx"`
+}
+
+// ReportResponse is the response body of POST /api/v1/reports for the json
+// format.
+type ReportResponse struct {
+	// Markdown is the draft report.
+	Markdown string `json:"markdown"`
+	// Notes are things the reviewer must check before the draft goes out,
+	// for example a number the activity documents do not contain. The same
+	// notes are written into the draft.
+	Notes []string `json:"notes"`
+	// Sources are the activity documents the narrative sections cite.
+	Sources []string `json:"sources"`
 }

@@ -65,6 +65,29 @@ type Config struct {
 
 	// CSR prospect tools (find_csr_prospects, check_company).
 	CSR CSRConfig
+
+	// Donation report tools (get_report_figures).
+	Report ReportConfig
+}
+
+// ReportConfig switches on the donation report feature: the
+// get_report_figures tool and POST /api/v1/reports.
+type ReportConfig struct {
+	// ToolsEnabled turns the feature on. Until the donation API adapter
+	// exists it serves built-in sample data only.
+	ToolsEnabled bool
+	// APIURL is the base URL of the donation data API (see
+	// docs/donation-data-api.md). When set, figures and activity documents
+	// are read from it. Empty means built-in sample figures and the
+	// documents in DocsDir.
+	APIURL string
+	// APIKey is sent to the API as X-API-Key; secret.
+	APIKey string
+	// APITimeout bounds each call to the API.
+	APITimeout time.Duration
+	// DocsDir holds the activity documents when APIURL is empty: one
+	// sub-folder per program id.
+	DocsDir string
 }
 
 // CSRConfig locates the CSR prospect index and the institution profile it
@@ -245,6 +268,8 @@ func (c Config) LogValue() slog.Value {
 		slog.Bool("csr_tools_enabled", c.CSR.ToolsEnabled),
 		slog.String("csr_db_path", c.CSR.DBPath),
 		slog.Bool("csr_on_demand_enabled", c.CSR.OnDemandEnabled),
+		slog.Bool("report_tools_enabled", c.Report.ToolsEnabled),
+		slog.String("report_api_url", c.Report.APIURL),
 	)
 }
 
@@ -288,6 +313,25 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 	cfg.Web = loadWeb(&r, cfg.RequestTimeout)
 	cfg.CSR = loadCSR(&r)
+	cfg.Report = ReportConfig{
+		ToolsEnabled: r.boolean("REPORT_TOOLS_ENABLED", false),
+		APIURL:       strings.TrimRight(r.str("REPORT_API_URL", ""), "/"),
+		APIKey:       r.str("REPORT_API_KEY", ""),
+		APITimeout:   r.seconds("REPORT_API_TIMEOUT_SECONDS", 15),
+		DocsDir:      r.str("REPORT_DOCS_DIR", "data/report-docs"),
+	}
+	if u := cfg.Report.APIURL; u != "" {
+		if parsed, err := url.Parse(u); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			r.fail("REPORT_API_URL must be an http(s) URL like https://donations.example.org")
+		}
+	}
+	if cfg.Report.APIURL != "" && !cfg.Report.ToolsEnabled {
+		r.fail("REPORT_API_URL is set but REPORT_TOOLS_ENABLED is not true")
+	}
+	if cfg.Report.APITimeout >= cfg.RequestTimeout {
+		r.fail(fmt.Sprintf("REPORT_API_TIMEOUT_SECONDS (%s) must be shorter than REQUEST_TIMEOUT_SECONDS (%s)",
+			cfg.Report.APITimeout, cfg.RequestTimeout))
+	}
 	if cfg.CSR.ToolsEnabled && (cfg.CSR.DBPath == "" || cfg.CSR.InstitutionProfilePath == "") {
 		r.fail("CSR_DB_PATH and CSR_INSTITUTION_PROFILE are required when CSR_TOOLS_ENABLED=true")
 	}

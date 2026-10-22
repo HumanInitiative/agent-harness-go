@@ -1,23 +1,13 @@
 package httpapi
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
-	"math"
 	"net/http"
-	"strconv"
-	"time"
 
 	"github.com/HumanInitiative/agent-harness-go/internal/application/agent"
 	"github.com/HumanInitiative/agent-harness-go/internal/ports/outbound"
 )
-
-// defaultRetryAfter is suggested to clients when the model provider is
-// unavailable but did not say how long to wait.
-const defaultRetryAfter = 5 * time.Second
 
 // ChatHandler exposes agent.Service over HTTP. It only decodes the request,
 // calls the use case, and maps the outcome to a response; every rule about
@@ -76,37 +66,20 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// decode reads exactly one JSON object with no unknown fields. It writes the
-// error response itself and reports false when the body is unusable.
+// decode reads the chat request. It writes the error response itself and
+// reports false when the body is unusable.
 func (h *ChatHandler) decode(w http.ResponseWriter, r *http.Request) (ChatRequest, bool) {
 	var req ChatRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-
-	err := dec.Decode(&req)
-	if err == nil && dec.Decode(&struct{}{}) != io.EOF {
-		err = errors.New("unexpected data after the JSON object")
-	}
-	if err == nil {
-		return req, true
-	}
-
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
-		writeError(w, r, http.StatusRequestEntityTooLarge, codeRequestTooLarge,
-			"request body exceeds "+strconv.FormatInt(tooLarge.Limit, 10)+" bytes")
+	if !decodeJSON(w, r, &req, `{"message": "..."}`) {
 		return ChatRequest{}, false
 	}
-	writeError(w, r, http.StatusBadRequest, codeInvalidRequest,
-		`request body must be a single JSON object like {"message": "..."}: `+err.Error())
-	return ChatRequest{}, false
+	return req, true
 }
 
 // writeChatError maps a use-case failure to an HTTP response. Each error is
 // logged exactly once, here, at a level that reflects whose problem it is.
 func (h *ChatHandler) writeChatError(w http.ResponseWriter, r *http.Request, err error) {
 	ctx := r.Context()
-	var unavailable *outbound.ModelUnavailableError
 
 	switch {
 	case errors.Is(err, agent.ErrInvalidInput):
@@ -116,23 +89,7 @@ func (h *ChatHandler) writeChatError(w http.ResponseWriter, r *http.Request, err
 		writeError(w, r, http.StatusConflict, codeConversationBusy,
 			"another turn of this conversation is still running; wait for it to finish")
 
-	case errors.Is(err, context.Canceled) && ctx.Err() != nil:
-		h.logger.InfoContext(ctx, "client disconnected before the reply was ready")
-		writeError(w, r, statusClientClosedRequest, codeClientClosed, "client closed request")
-
-	case errors.Is(err, context.DeadlineExceeded):
-		h.logger.WarnContext(ctx, "request timed out", "error", err)
-		writeError(w, r, http.StatusGatewayTimeout, codeTimeout, "the agent did not reply in time")
-
-	case errors.As(err, &unavailable):
-		retryAfter := unavailable.RetryAfter
-		if retryAfter <= 0 {
-			retryAfter = defaultRetryAfter
-		}
-		h.logger.WarnContext(ctx, "model provider unavailable", "error", err, "retry_after", retryAfter)
-		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
-		writeError(w, r, http.StatusServiceUnavailable, codeModelUnavailable,
-			"the model provider is temporarily unavailable, retry later")
+	case writeCommonError(h.logger, w, r, err):
 
 	case errors.Is(err, outbound.ErrToolTurnLimit):
 		h.logger.WarnContext(ctx, "agent exhausted its tool-call limit", "error", err)

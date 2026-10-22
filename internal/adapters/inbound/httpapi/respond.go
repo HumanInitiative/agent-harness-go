@@ -20,6 +20,11 @@ const (
 	codeModelUnavailable = "model_unavailable"
 	codeTimeout          = "timeout"
 	codeClientClosed     = "client_closed_request"
+
+	codeProgramNotFound  = "program_not_found"
+	codeDocumentNotFound = "document_not_found"
+	codeNoDocuments      = "no_documents"
+	codeNarrativeFailed  = "narrative_failed"
 )
 
 // statusClientClosedRequest is the de-facto (nginx) status for "the client

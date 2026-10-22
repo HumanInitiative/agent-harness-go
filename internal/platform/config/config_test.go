@@ -283,3 +283,56 @@ func TestLoadCrawlerFrom_NeedsNoAPIKeysAndForcesWebValidation(t *testing.T) {
 		t.Fatal("zero workers must be rejected")
 	}
 }
+
+func TestLoad_ReportDocsDir(t *testing.T) {
+	cfg, err := config.LoadFrom(env(requiredOnly()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Report.ToolsEnabled || cfg.Report.DocsDir != "data/report-docs" {
+		t.Errorf("defaults: %+v", cfg.Report)
+	}
+	cfg, err = config.LoadFrom(env(merge(merge(requiredOnly(), "REPORT_TOOLS_ENABLED", "true"), "REPORT_DOCS_DIR", "/srv/docs")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Report.ToolsEnabled || cfg.Report.DocsDir != "/srv/docs" {
+		t.Errorf("enabled: %+v", cfg.Report)
+	}
+}
+
+func TestLoad_ReportAPI(t *testing.T) {
+	on := merge(requiredOnly(), "REPORT_TOOLS_ENABLED", "true")
+	cfg, err := config.LoadFrom(env(merge(merge(merge(on, "REPORT_API_URL", "https://donations.example.org/"), "REPORT_API_KEY", "k"), "REPORT_API_TIMEOUT_SECONDS", "20")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Report.APIURL != "https://donations.example.org" || cfg.Report.APIKey != "k" || cfg.Report.APITimeout != 20*time.Second {
+		t.Errorf("report API: %+v", cfg.Report)
+	}
+	for name, vars := range map[string]map[string]string{
+		"not a URL":        merge(on, "REPORT_API_URL", "donations.example.org"),
+		"wrong scheme":     merge(on, "REPORT_API_URL", "ftp://donations.example.org"),
+		"feature off":      merge(requiredOnly(), "REPORT_API_URL", "https://donations.example.org"),
+		"timeout too long": merge(merge(on, "REPORT_API_URL", "https://d.example.org"), "REPORT_API_TIMEOUT_SECONDS", "60"),
+	} {
+		if _, err := config.LoadFrom(env(vars)); err == nil || !strings.Contains(err.Error(), "REPORT_API") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestConfig_LogValueHidesTheReportAPIKey(t *testing.T) {
+	cfg, err := config.LoadFrom(env(merge(merge(merge(requiredOnly(), "REPORT_TOOLS_ENABLED", "true"),
+		"REPORT_API_URL", "https://d.example.org"), "REPORT_API_KEY", "donation-api-secret")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := cfg.LogValue().String()
+	if strings.Contains(rendered, "donation-api-secret") {
+		t.Fatalf("report API key leaked into log value: %s", rendered)
+	}
+	if !strings.Contains(rendered, "https://d.example.org") {
+		t.Errorf("the API URL is not secret and should be logged: %s", rendered)
+	}
+}
