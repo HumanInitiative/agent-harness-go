@@ -29,8 +29,9 @@ type RouterConfig struct {
 	// RateLimitPerMinute and RateLimitBurst configure the per-key limit.
 	RateLimitPerMinute int
 	RateLimitBurst     int
-	// Reports serves POST /api/v1/reports. Nil leaves the endpoint
-	// unmounted (404), which is how the report feature stays off.
+	// Reports serves POST /api/v1/reports, GET /api/v1/programs and the
+	// page at /reports. Nil leaves them unmounted (404), which is how the
+	// report feature stays off.
 	Reports *ReportHandler
 }
 
@@ -84,8 +85,16 @@ func NewRouter(chat *ChatHandler, log *slog.Logger, cfg RouterConfig) (http.Hand
 		api.Method(http.MethodPost, "/chat", chat)
 		if cfg.Reports != nil {
 			api.Method(http.MethodPost, "/reports", cfg.Reports)
+			api.Get("/programs", cfg.Reports.Programs)
 		}
 	})
+
+	if cfg.Reports != nil {
+		// The page itself is static and public; the API calls it makes are not.
+		page := ReportPage()
+		r.Get("/reports", page.ServeHTTP)
+		r.Get("/reports/{asset}", page.ServeHTTP)
+	}
 
 	if cfg.SwaggerEnabled {
 		// Generated from the @-annotations by `make swagger`.

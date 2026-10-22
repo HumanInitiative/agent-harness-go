@@ -218,3 +218,24 @@ func TestNew_Validation(t *testing.T) {
 		t.Error("a zero timeout must be refused")
 	}
 }
+
+func TestPrograms(t *testing.T) {
+	c := newClient(t, mock(t, ""), "")
+	got, err := c.Programs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "pangan-jakarta" || got[0].Name != "Bantuan Pangan Jakarta" {
+		t.Errorf("programs = %+v", got)
+	}
+
+	for name, body := range map[string]string{"not json": "<html>", "no name": `[{"id":"x","name":" "}]`} {
+		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, body) })
+		if _, err := newClient(t, h, "").Programs(context.Background()); err == nil {
+			t.Errorf("%s must be refused", name)
+		}
+	}
+	if _, err := newClient(t, mock(t, "k"), "wrong").Programs(context.Background()); err == nil || !strings.Contains(err.Error(), "rejected the API key") {
+		t.Errorf("wrong key: %v", err)
+	}
+}

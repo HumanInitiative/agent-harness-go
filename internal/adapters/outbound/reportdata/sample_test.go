@@ -39,3 +39,10 @@ func TestSample_UnknownProgram(t *testing.T) {
 		t.Fatalf("err = %v, want ErrProgramNotFound", err)
 	}
 }
+
+func TestSample_Programs(t *testing.T) {
+	got, err := NewSample(nil).Programs(context.Background())
+	if err != nil || len(got) != 1 || got[0].ID != SampleProgramID {
+		t.Fatalf("programs = %+v, err = %v", got, err)
+	}
+}

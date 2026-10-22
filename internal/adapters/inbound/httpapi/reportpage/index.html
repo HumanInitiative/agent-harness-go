@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Draf Laporan Donasi</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/reports/app.css">
+</head>
+<body>
+<main>
+  <h1>Draf laporan donasi</h1>
+  <p class="lede">Pilih program dan periode. Angka diambil dari data donasi. Narasi ditulis AI dari dokumen
+    kegiatan program dan harus direview orang sebelum dikirim ke donor.</p>
+
+  <form id="form" novalidate>
+    <div class="field">
+      <label for="key">Kunci API</label>
+      <div class="inline">
+        <input id="key" type="password" autocomplete="off" spellcheck="false">
+        <button type="button" id="load" class="secondary">Muat program</button>
+      </div>
+      <p class="hint">Disimpan hanya selama tab ini terbuka.</p>
+    </div>
+
+    <div class="field">
+      <label for="program">Program</label>
+      <select id="program" disabled>
+        <option value="">Muat program dulu</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="from">Dari tanggal</label>
+        <input id="from" type="date">
+      </div>
+      <div class="field">
+        <label for="to">Sampai tanggal</label>
+        <input id="to" type="date">
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="submit" id="preview">Buat draf</button>
+      <button type="button" id="download" class="secondary">Unduh Word (.docx)</button>
+    </div>
+  </form>
+
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <section id="result" hidden>
+    <div id="notes-box" class="notes" hidden>
+      <h2>Periksa sebelum dikirim</h2>
+      <ul id="notes"></ul>
+    </div>
+    <h2>Draf</h2>
+    <pre id="draft" tabindex="0"></pre>
+    <h2>Dokumen sumber</h2>
+    <ul id="sources"></ul>
+  </section>
+</main>
+<script src="/reports/app.js"></script>
+</body>
+</html>
