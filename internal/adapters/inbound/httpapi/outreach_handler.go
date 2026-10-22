@@ -9,6 +9,7 @@ import (
 
 	"github.com/HumanInitiative/agent-harness-go/internal/application/prospecting"
 	"github.com/HumanInitiative/agent-harness-go/internal/domain/outreach"
+	"github.com/HumanInitiative/agent-harness-go/internal/ports/outbound"
 )
 
 // OutreachHandler exposes prospecting.Service over HTTP.
@@ -49,7 +50,7 @@ func NewOutreachHandler(service *prospecting.Service, logger *slog.Logger) *Outr
 //	@Router			/api/v1/outreach [post]
 func (h *OutreachHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req OutreachRequest
-	if !decodeJSON(w, r, &req, `{"program": {"name": "...", "focus_areas": ["pendidikan"]}}`) {
+	if !decodeJSON(w, r, &req, `{"program": {"name": "...", "focus_areas": ["pendidikan"]}} or {"program_id": "..."}`) {
 		return
 	}
 	format := strings.ToLower(strings.TrimSpace(req.Format))
@@ -63,14 +64,13 @@ func (h *OutreachHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list, err := h.service.Run(r.Context(), prospecting.Input{
-		Program: outreach.Program{
-			Name: req.Program.Name, Description: req.Program.Description,
-			FocusAreas: req.Program.FocusAreas, Regions: req.Program.Regions, ProgramTypes: req.Program.ProgramTypes,
-		},
-		Limit:  req.Limit,
-		Emails: req.Emails == nil || *req.Emails,
-	})
+	in := prospecting.Input{ProgramID: req.ProgramID, Limit: req.Limit, Emails: req.Emails == nil || *req.Emails}
+	if p := req.Program; p != nil {
+		in.Program = outreach.Program{
+			Name: p.Name, Description: p.Description, FocusAreas: p.FocusAreas, Regions: p.Regions, ProgramTypes: p.ProgramTypes,
+		}
+	}
+	list, err := h.service.Run(r.Context(), in)
 	if err != nil {
 		h.writeError(w, r, err)
 		return
@@ -97,9 +97,13 @@ func (h *OutreachHandler) writeError(w http.ResponseWriter, r *http.Request, err
 	case errors.Is(err, prospecting.ErrInvalidInput), errors.Is(err, prospecting.ErrUnknownFormat):
 		writeError(w, r, http.StatusBadRequest, codeInvalidRequest, err.Error())
 
+	case errors.Is(err, outbound.ErrProgramNotFound):
+		writeError(w, r, http.StatusNotFound, codeProgramNotFound, "no program with that id in the catalog")
+
 	case errors.Is(err, prospecting.ErrNoProspects):
-		writeError(w, r, http.StatusUnprocessableEntity, codeNoProspects,
-			"no company in the CSR index fits this program; the index may not cover its field yet")
+		// The error carries what is wrong with the criteria, which is the
+		// reason a person needs to fix the request.
+		writeError(w, r, http.StatusUnprocessableEntity, codeNoProspects, err.Error())
 
 	case writeCommonError(h.logger, w, r, err):
 
@@ -109,19 +113,81 @@ func (h *OutreachHandler) writeError(w http.ResponseWriter, r *http.Request, err
 	}
 }
 
+// vocabularyNote tells a person what the program's criteria may contain.
+const vocabularyNote = "Bidang fokus dan jenis dukungan dicocokkan lewat kelompok di atas: tulis nama kelompok atau salah satu kata di bawahnya. " +
+	"Istilah lain hanya cocok dengan perusahaan yang memakai kata yang sama persis. " +
+	"Wilayah berupa teks bebas (nama provinsi atau kabupaten; singkatan umum seperti Jabar dikenali), dan perusahaan berskala nasional juga dihitung cocok."
+
+// Catalog handles GET /api/v1/outreach/programs.
+//
+//	@Summary		List the Human Initiative programs that can be shortlisted for
+//	@Description	The programs in the catalog file (OUTREACH_PROGRAMS_FILE). Send one's id as program_id
+//	@Description	instead of describing the program again.
+//	@Tags			outreach
+//	@Produce		json
+//	@Security		ApiKeyAuth
+//	@Success		200	{array}		OutreachProgramDTO
+//	@Failure		401	{object}	ErrorResponse	"unauthorized: missing or invalid X-API-Key"
+//	@Failure		429	{object}	ErrorResponse	"rate_limited: see Retry-After header"
+//	@Router			/api/v1/outreach/programs [get]
+func (h *OutreachHandler) Catalog(w http.ResponseWriter, r *http.Request) {
+	programs, err := h.service.Catalog(r.Context())
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	out := make([]OutreachProgramDTO, 0, len(programs))
+	for _, p := range programs {
+		out = append(out, programDTO(p))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// Vocabulary handles GET /api/v1/outreach/vocabulary.
+//
+//	@Summary		List the fields of work a program's criteria may use
+//	@Description	The focus areas the scoring understands and the words that count as each. Terms outside
+//	@Description	them still work, but only match companies that use exactly the same words.
+//	@Tags			outreach
+//	@Produce		json
+//	@Security		ApiKeyAuth
+//	@Success		200	{object}	OutreachVocabularyResponse
+//	@Failure		401	{object}	ErrorResponse	"unauthorized: missing or invalid X-API-Key"
+//	@Failure		429	{object}	ErrorResponse	"rate_limited: see Retry-After header"
+//	@Router			/api/v1/outreach/vocabulary [get]
+func (h *OutreachHandler) Vocabulary(w http.ResponseWriter, r *http.Request) {
+	groups := h.service.FocusGroups()
+	out := OutreachVocabularyResponse{FocusAreas: make([]FocusGroupDTO, 0, len(groups)), Note: vocabularyNote}
+	for _, g := range groups {
+		out.FocusAreas = append(out.FocusAreas, FocusGroupDTO{Name: g.Name, AlsoRecognized: nonNil(g.Synonyms)})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func programDTO(p outreach.Program) OutreachProgramDTO {
+	return OutreachProgramDTO{
+		ID: p.ID, Name: p.Name, Description: p.Description, FocusAreas: nonNil(p.FocusAreas),
+		Regions: p.Regions, ProgramTypes: p.ProgramTypes,
+	}
+}
+
 func toOutreachResponse(l outreach.Shortlist) OutreachResponse {
 	out := OutreachResponse{
-		Program: OutreachProgramDTO{
-			Name: l.Program.Name, Description: l.Program.Description, FocusAreas: nonNil(l.Program.FocusAreas),
-			Regions: l.Program.Regions, ProgramTypes: l.Program.ProgramTypes,
-		},
-		GeneratedAt: l.GeneratedAt.Format(reportDateLayout),
-		Entries:     make([]OutreachEntryDTO, 0, len(l.Entries)),
+		Program:      programDTO(l.Program),
+		Warnings:     nonNil(l.Warnings),
+		TermCoverage: make([]TermCoverageDTO, 0, len(l.Terms)),
+		GeneratedAt:  l.GeneratedAt.Format(reportDateLayout),
+		Entries:      make([]OutreachEntryDTO, 0, len(l.Entries)),
 		Trace: OutreachTraceDTO{
 			Fitting: l.Trace.Candidates, InputTokens: l.Trace.InputTokens, OutputTokens: l.Trace.OutputTokens,
 			EstimatedCostRupiah: l.Trace.EstimatedCostRupiah, DurationMS: l.Trace.DurationMS,
 			Emails: make([]OutreachEmailTraceDTO, 0, len(l.Trace.Emails)),
 		},
+	}
+	for _, t := range l.Terms {
+		out.TermCoverage = append(out.TermCoverage, TermCoverageDTO{
+			Kind: t.Kind, Term: t.Term, Group: t.Group, Recognized: t.Recognized, Companies: t.Companies,
+		})
 	}
 	for _, t := range l.Trace.Emails {
 		out.Trace.Emails = append(out.Trace.Emails, OutreachEmailTraceDTO{

@@ -81,6 +81,9 @@ type Index struct {
 	opts    IndexOptions
 }
 
+// Profile returns the institution profile the index scores against.
+func (i *Index) Profile() InstitutionProfile { return i.profile }
+
 // NewIndex builds an Index over store, scoring against profile.
 func NewIndex(store *Store, profile InstitutionProfile, opts IndexOptions) *Index {
 	if opts.StaleAfter <= 0 {

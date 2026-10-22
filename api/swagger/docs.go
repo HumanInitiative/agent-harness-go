@@ -192,6 +192,83 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/outreach/programs": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "The programs in the catalog file (OUTREACH_PROGRAMS_FILE). Send one's id as program_id\ninstead of describing the program again.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "outreach"
+                ],
+                "summary": "List the Human Initiative programs that can be shortlisted for",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/httpapi.OutreachProgramDTO"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: missing or invalid X-API-Key",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "rate_limited: see Retry-After header",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/outreach/vocabulary": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "The focus areas the scoring understands and the words that count as each. Terms outside\nthem still work, but only match companies that use exactly the same words.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "outreach"
+                ],
+                "summary": "List the fields of work a program's criteria may use",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.OutreachVocabularyResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized: missing or invalid X-API-Key",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "rate_limited: see Retry-After header",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/programs": {
             "get": {
                 "security": [
@@ -453,6 +530,26 @@ const docTemplate = `{
                 }
             }
         },
+        "httpapi.FocusGroupDTO": {
+            "type": "object",
+            "properties": {
+                "also_recognized": {
+                    "description": "AlsoRecognized are other words that count as the same field.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "beasiswa",
+                        "sekolah"
+                    ]
+                },
+                "name": {
+                    "type": "string",
+                    "example": "pendidikan"
+                }
+            }
+        },
         "httpapi.OutreachCompanyDTO": {
             "type": "object",
             "properties": {
@@ -616,6 +713,11 @@ const docTemplate = `{
                         "pendidikan"
                     ]
                 },
+                "id": {
+                    "description": "ID names the program in the catalog. Set when listing the catalog;\nignored in a request, which uses program_id for that.",
+                    "type": "string",
+                    "example": "beasiswa-anak-desa"
+                },
                 "name": {
                     "description": "Name of the program. Required.",
                     "type": "string",
@@ -686,7 +788,17 @@ const docTemplate = `{
                     "example": 10
                 },
                 "program": {
-                    "$ref": "#/definitions/httpapi.OutreachProgramDTO"
+                    "description": "Program describes the program in the request itself.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/httpapi.OutreachProgramDTO"
+                        }
+                    ]
+                },
+                "program_id": {
+                    "description": "ProgramID picks a program of the catalog (GET /api/v1/outreach/programs).\nGive this or Program, not both.",
+                    "type": "string",
+                    "example": "beasiswa-anak-desa"
                 }
             }
         },
@@ -706,8 +818,22 @@ const docTemplate = `{
                 "program": {
                     "$ref": "#/definitions/httpapi.OutreachProgramDTO"
                 },
+                "term_coverage": {
+                    "description": "TermCoverage says, for each focus area, region and program type, how\nmany indexed companies match it.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpapi.TermCoverageDTO"
+                    }
+                },
                 "trace": {
                     "$ref": "#/definitions/httpapi.OutreachTraceDTO"
+                },
+                "warnings": {
+                    "description": "Warnings are problems with the program's criteria that make the\nshortlist shorter or poorer than hoped: a focus area the scoring does\nnot know, or a term no indexed company matches.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -736,6 +862,22 @@ const docTemplate = `{
                 },
                 "output_tokens": {
                     "type": "integer"
+                }
+            }
+        },
+        "httpapi.OutreachVocabularyResponse": {
+            "type": "object",
+            "properties": {
+                "focus_areas": {
+                    "description": "FocusAreas are the fields the scoring understands. A focus area or\nprogram type may use the name or any word listed under it.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/httpapi.FocusGroupDTO"
+                    }
+                },
+                "note": {
+                    "description": "Note explains the rest: regions are free text.",
+                    "type": "string"
                 }
             }
         },
@@ -821,6 +963,38 @@ const docTemplate = `{
                 "status": {
                     "type": "string",
                     "example": "ok"
+                }
+            }
+        },
+        "httpapi.TermCoverageDTO": {
+            "type": "object",
+            "properties": {
+                "companies": {
+                    "description": "Companies is how many indexed companies match the term.",
+                    "type": "integer",
+                    "example": 12
+                },
+                "group": {
+                    "description": "Group is the known field the term maps to; empty when not recognized.",
+                    "type": "string",
+                    "example": "pendidikan"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "focus",
+                        "region",
+                        "type"
+                    ],
+                    "example": "focus"
+                },
+                "recognized": {
+                    "description": "Recognized is false for a focus area or program type the scoring does\nnot know; it then only matches companies using the same words.",
+                    "type": "boolean"
+                },
+                "term": {
+                    "type": "string",
+                    "example": "pendidikan"
                 }
             }
         },

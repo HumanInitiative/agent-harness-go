@@ -59,6 +59,10 @@ func (f *fakeSource) Prospects(_ context.Context, _ outreach.Program, limit int)
 	return f.result, f.err
 }
 
+func (f *fakeSource) FocusGroups() []outreach.FocusGroup {
+	return []outreach.FocusGroup{{Name: "pendidikan"}, {Name: "kesehatan"}}
+}
+
 func prospects(cs ...outreach.Candidate) *fakeSource {
 	return &fakeSource{result: outbound.Prospects{Candidates: cs, Fitting: len(cs) + 4}}
 }
@@ -412,5 +416,107 @@ func TestNewService_Validation(t *testing.T) {
 	}
 	if _, err := prospecting.NewService(prospects(), newModel(goodAnswer), []outbound.DraftRenderer{fakeRenderer{}, fakeRenderer{}}, ok, quiet()); err == nil {
 		t.Error("two renderers for one format must be refused")
+	}
+}
+
+type fakeCatalog struct {
+	programs []outreach.Program
+	err      error
+}
+
+func (f fakeCatalog) Programs(context.Context) ([]outreach.Program, error) {
+	return append([]outreach.Program(nil), f.programs...), f.err
+}
+
+func (f fakeCatalog) Program(_ context.Context, id string) (outreach.Program, error) {
+	for _, p := range f.programs {
+		if p.ID == id {
+			return p, nil
+		}
+	}
+	return outreach.Program{}, outbound.ErrProgramNotFound
+}
+
+func catalogProgram() outreach.Program {
+	p := program()
+	p.ID = "beasiswa-anak-desa"
+	return p
+}
+
+func TestRun_ProgramFromTheCatalog(t *testing.T) {
+	s := service(t, prospects(candidate("PT Satu")), newModel(goodAnswer)).
+		WithCatalog(fakeCatalog{programs: []outreach.Program{catalogProgram()}})
+	list, err := s.Run(context.Background(), prospecting.Input{ProgramID: " beasiswa-anak-desa "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Program.ID != "beasiswa-anak-desa" || list.Program.Name != "Beasiswa Anak Desa" || len(list.Program.FocusAreas) != 1 {
+		t.Errorf("program = %+v", list.Program)
+	}
+	if got, err := s.Catalog(context.Background()); err != nil || len(got) != 1 {
+		t.Errorf("Catalog = %v, %v", got, err)
+	}
+}
+
+func TestRun_ProgramResolutionErrors(t *testing.T) {
+	withCatalog := service(t, prospects(candidate("PT Satu")), newModel(goodAnswer)).
+		WithCatalog(fakeCatalog{programs: []outreach.Program{catalogProgram()}})
+	if _, err := withCatalog.Run(context.Background(), prospecting.Input{ProgramID: "tidak-ada"}); !errors.Is(err, outbound.ErrProgramNotFound) {
+		t.Errorf("unknown id: %v", err)
+	}
+	if _, err := withCatalog.Run(context.Background(), prospecting.Input{ProgramID: "beasiswa-anak-desa", Program: program()}); !errors.Is(err, prospecting.ErrInvalidInput) {
+		t.Errorf("both an id and an inline program: %v", err)
+	}
+	if _, err := withCatalog.Run(context.Background(), prospecting.Input{}); !errors.Is(err, prospecting.ErrInvalidInput) {
+		t.Errorf("neither: %v", err)
+	}
+	noCatalog := service(t, prospects(candidate("PT Satu")), newModel(goodAnswer))
+	if _, err := noCatalog.Run(context.Background(), prospecting.Input{ProgramID: "beasiswa-anak-desa"}); !errors.Is(err, prospecting.ErrInvalidInput) {
+		t.Errorf("an id without a catalog: %v", err)
+	}
+	if got, err := noCatalog.Catalog(context.Background()); err != nil || got == nil || len(got) != 0 {
+		t.Errorf("no catalog lists nothing: %#v, %v", got, err)
+	}
+	broken := service(t, prospects(), newModel(goodAnswer)).WithCatalog(fakeCatalog{err: errors.New("disk")})
+	if _, err := broken.Catalog(context.Background()); err == nil {
+		t.Error("catalog errors must surface")
+	}
+}
+
+func TestRun_CarriesTheCriteriaWarnings(t *testing.T) {
+	src := prospects(candidate("PT Satu"))
+	src.result.Terms = []outreach.TermCoverage{
+		{Kind: "focus", Term: "pendidikan", Recognized: true, Companies: 9},
+		{Kind: "focus", Term: "olahraga", Recognized: false, Companies: 0},
+	}
+	list, err := service(t, src, newModel(goodAnswer)).Run(context.Background(), prospecting.Input{Program: program()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Terms) != 2 || len(list.Warnings) != 1 || !strings.Contains(list.Warnings[0], `"olahraga"`) ||
+		!strings.Contains(list.Warnings[0], "pendidikan, kesehatan") {
+		t.Errorf("terms = %+v, warnings = %v", list.Terms, list.Warnings)
+	}
+}
+
+func TestRun_NoProspectsSaysWhy(t *testing.T) {
+	src := &fakeSource{result: outbound.Prospects{Terms: []outreach.TermCoverage{
+		{Kind: "region", Term: "Papua", Recognized: true, Companies: 0},
+	}}}
+	_, err := service(t, src, newModel(goodAnswer)).Run(context.Background(), prospecting.Input{Program: program()})
+	var none *prospecting.NoProspectsError
+	if !errors.Is(err, prospecting.ErrNoProspects) || !errors.As(err, &none) || len(none.Warnings) != 1 ||
+		!strings.Contains(err.Error(), `wilayah "Papua"`) {
+		t.Fatalf("err = %v", err)
+	}
+	if (&prospecting.NoProspectsError{}).Error() != prospecting.ErrNoProspects.Error() {
+		t.Error("without warnings the message is the plain one")
+	}
+}
+
+func TestFocusGroupsAreOfferedByTheSource(t *testing.T) {
+	groups := service(t, prospects(), newModel(goodAnswer)).FocusGroups()
+	if len(groups) != 2 || groups[0].Name != "pendidikan" {
+		t.Errorf("groups = %+v", groups)
 	}
 }

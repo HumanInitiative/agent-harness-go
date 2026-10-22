@@ -14,6 +14,7 @@ package outreach
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -24,9 +25,19 @@ const (
 	maxTerms            = 12
 )
 
+// programIDPattern is the shape of a catalog id: lowercase words joined by
+// dashes, so an id is safe in a URL and in a file.
+var programIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// ValidProgramID reports whether id can name a catalog program.
+func ValidProgramID(id string) bool { return programIDPattern.MatchString(id) }
+
 // Program is the Human Initiative program that needs funding. Its focus
 // areas, regions and types are what companies are scored against.
 type Program struct {
+	// ID names the program in the catalog; empty for a program described
+	// inline in a request.
+	ID          string
 	Name        string
 	Description string
 	// FocusAreas are the fields the program works in ("pendidikan").
@@ -62,6 +73,7 @@ func (p Program) Validate() error {
 // Clean returns the program with blank terms dropped and whitespace trimmed.
 func (p Program) Clean() Program {
 	return Program{
+		ID:           strings.TrimSpace(p.ID),
 		Name:         strings.TrimSpace(p.Name),
 		Description:  strings.TrimSpace(p.Description),
 		FocusAreas:   cleanTerms(p.FocusAreas),
@@ -195,10 +207,42 @@ type Trace struct {
 	EstimatedCostRupiah *float64
 }
 
+// FocusGroup is a field of work the scoring understands, with the other
+// words that count as the same field.
+type FocusGroup struct {
+	Name     string
+	Synonyms []string
+}
+
+// Kinds of term a program is described by.
+const (
+	TermFocus  = "focus"
+	TermRegion = "region"
+	TermType   = "type"
+)
+
+// TermCoverage says how well one term of the program is covered by the
+// companies in the index.
+type TermCoverage struct {
+	Kind string
+	Term string
+	// Group is the known field the term maps to; empty when not Recognized.
+	Group string
+	// Recognized is false for a focus area or program type the scoring does
+	// not know: it then only matches companies using the same words.
+	Recognized bool
+	// Companies is how many indexed companies match the term.
+	Companies int
+}
+
 // Shortlist is the result of a run.
 type Shortlist struct {
-	Program     Program
-	Entries     []Entry
+	Program Program
+	Entries []Entry
+	// Terms and Warnings describe how the program's criteria fared against
+	// the index: a term nobody matches is why a shortlist is short or empty.
+	Terms       []TermCoverage
+	Warnings    []string
 	GeneratedAt time.Time
 	Trace       Trace
 }

@@ -27,6 +27,10 @@ func (s Shortlist) Draft() report.Draft {
 			"DRAFT. Disusun dengan bantuan AI dari indeks CSR. Perusahaan berstatus \"belum diverifikasi\" "+
 			"belum dikonfirmasi orang, dan setiap email perlu dibaca serta disesuaikan sebelum dikirim."),
 	)
+	if len(s.Warnings) > 0 {
+		add(report.Block{Kind: report.BlockParagraph, Bold: true, Text: "Perhatikan kriteria program:"},
+			report.Block{Kind: report.BlockBullets, Items: s.Warnings})
+	}
 	if len(s.Entries) == 0 {
 		add(para("Tidak ada perusahaan di indeks yang cocok dengan program ini."))
 		return d

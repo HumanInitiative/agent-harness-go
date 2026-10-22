@@ -27,10 +27,15 @@ var outreachDay = time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 
 type outreachSource struct {
 	candidates []outreach.Candidate
+	terms      []outreach.TermCoverage
 }
 
 func (s outreachSource) Prospects(context.Context, outreach.Program, int) (outbound.Prospects, error) {
-	return outbound.Prospects{Candidates: s.candidates, Fitting: len(s.candidates) + 3}, nil
+	return outbound.Prospects{Candidates: s.candidates, Fitting: len(s.candidates) + 3, Terms: s.terms}, nil
+}
+
+func (outreachSource) FocusGroups() []outreach.FocusGroup {
+	return []outreach.FocusGroup{{Name: "pendidikan", Synonyms: []string{"beasiswa"}}, {Name: "kesehatan"}}
 }
 
 type outreachModel struct {
@@ -56,7 +61,20 @@ func outreachCandidate() outreach.Candidate {
 	}
 }
 
-func outreachServer(t *testing.T, source outbound.ProspectSource, model outbound.ModelPort) testServer {
+type outreachCatalog []outreach.Program
+
+func (c outreachCatalog) Programs(context.Context) ([]outreach.Program, error) { return c, nil }
+
+func (c outreachCatalog) Program(_ context.Context, id string) (outreach.Program, error) {
+	for _, p := range c {
+		if p.ID == id {
+			return p, nil
+		}
+	}
+	return outreach.Program{}, outbound.ErrProgramNotFound
+}
+
+func outreachServer(t *testing.T, source outbound.ProspectSource, model outbound.ModelPort, catalog ...outreach.Program) testServer {
 	t.Helper()
 	return newTestServer(t, replyWith("unused"), func(cfg *httpapi.RouterConfig) {
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -65,6 +83,9 @@ func outreachServer(t *testing.T, source outbound.ProspectSource, model outbound
 		svc, err := prospecting.NewService(source, model, []outbound.DraftRenderer{reportdocx.New()}, pc, log)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if len(catalog) > 0 {
+			svc.WithCatalog(outreachCatalog(catalog))
 		}
 		cfg.Outreach = httpapi.NewOutreachHandler(svc, log)
 	})
@@ -262,5 +283,96 @@ func TestOutreach_EndToEndWithARealIndex(t *testing.T) {
 	}
 	if got.Trace.Fitting != 1 || got.Trace.InputTokens != 900 {
 		t.Errorf("trace: %+v", got.Trace)
+	}
+}
+
+func catalogProgramHI() outreach.Program {
+	return outreach.Program{ID: "beasiswa-anak-desa", Name: "Beasiswa Anak Desa", Description: "Beasiswa untuk 120 anak.",
+		FocusAreas: []string{"pendidikan"}, Regions: []string{"Jawa Barat"}, ProgramTypes: []string{"beasiswa"}}
+}
+
+func TestOutreach_ProgramFromTheCatalog(t *testing.T) {
+	model := &outreachModel{output: outreachAnswer}
+	s := outreachServer(t, outreachSource{candidates: []outreach.Candidate{outreachCandidate()}}, model, catalogProgramHI())
+
+	rec := s.outreach(`{"program_id":"beasiswa-anak-desa","emails":false}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got httpapi.OutreachResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Program.ID != "beasiswa-anak-desa" || got.Program.Name != "Beasiswa Anak Desa" || len(got.Program.FocusAreas) != 1 {
+		t.Errorf("program = %+v", got.Program)
+	}
+
+	expectError(t, s.outreach(`{"program_id":"tidak-ada"}`), http.StatusNotFound, "program_not_found")
+	expectError(t, s.outreach(`{"program_id":"beasiswa-anak-desa","program":{"name":"P","focus_areas":["x"]}}`), http.StatusBadRequest, "invalid_request")
+	expectError(t, s.outreach(`{}`), http.StatusBadRequest, "invalid_request")
+	noCatalog := outreachServer(t, outreachSource{candidates: []outreach.Candidate{outreachCandidate()}}, model)
+	expectError(t, noCatalog.outreach(`{"program_id":"beasiswa-anak-desa"}`), http.StatusBadRequest, "invalid_request")
+}
+
+func TestOutreach_CatalogAndVocabularyEndpoints(t *testing.T) {
+	s := outreachServer(t, outreachSource{}, &outreachModel{}, catalogProgramHI())
+	expectError(t, s.do(http.MethodGet, "/api/v1/outreach/programs", "", ""), http.StatusUnauthorized, "unauthorized")
+	expectError(t, s.do(http.MethodGet, "/api/v1/outreach/vocabulary", "", ""), http.StatusUnauthorized, "unauthorized")
+
+	rec := s.do(http.MethodGet, "/api/v1/outreach/programs", testKey, "")
+	var programs []httpapi.OutreachProgramDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &programs); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("programs: %d %v %s", rec.Code, err, rec.Body.String())
+	}
+	if len(programs) != 1 || programs[0].ID != "beasiswa-anak-desa" || programs[0].FocusAreas[0] != "pendidikan" || programs[0].Regions[0] != "Jawa Barat" {
+		t.Errorf("programs = %+v", programs)
+	}
+	empty := outreachServer(t, outreachSource{}, &outreachModel{}).do(http.MethodGet, "/api/v1/outreach/programs", testKey, "")
+	if strings.TrimSpace(empty.Body.String()) != "[]" {
+		t.Errorf("no catalog must list [], got %q", empty.Body.String())
+	}
+
+	rec = s.do(http.MethodGet, "/api/v1/outreach/vocabulary", testKey, "")
+	var vocab httpapi.OutreachVocabularyResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &vocab); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("vocabulary: %d %v", rec.Code, err)
+	}
+	if len(vocab.FocusAreas) != 2 || vocab.FocusAreas[0].Name != "pendidikan" || vocab.FocusAreas[0].AlsoRecognized[0] != "beasiswa" ||
+		vocab.FocusAreas[1].AlsoRecognized == nil || !strings.Contains(vocab.Note, "Wilayah berupa teks bebas") {
+		t.Errorf("vocabulary = %+v", vocab)
+	}
+	expectError(t, newTestServer(t, replyWith("x")).do(http.MethodGet, "/api/v1/outreach/programs", testKey, ""), http.StatusNotFound, "not_found")
+}
+
+func TestOutreach_WarnsAboutCriteria(t *testing.T) {
+	terms := []outreach.TermCoverage{
+		{Kind: "focus", Term: "pendidikan", Group: "pendidikan", Recognized: true, Companies: 9},
+		{Kind: "focus", Term: "olahraga", Recognized: false, Companies: 0},
+	}
+	s := outreachServer(t, outreachSource{candidates: []outreach.Candidate{outreachCandidate()}, terms: terms}, &outreachModel{output: outreachAnswer})
+	rec := s.outreach(`{"program":{"name":"P","focus_areas":["pendidikan","olahraga"]},"emails":false}`)
+	var got httpapi.OutreachResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.TermCoverage) != 2 || got.TermCoverage[0].Companies != 9 || got.TermCoverage[0].Group != "pendidikan" || got.TermCoverage[1].Recognized {
+		t.Errorf("term coverage = %+v", got.TermCoverage)
+	}
+	if len(got.Warnings) != 1 || !strings.Contains(got.Warnings[0], `"olahraga"`) {
+		t.Errorf("warnings = %v", got.Warnings)
+	}
+	clean := outreachServer(t, outreachSource{candidates: []outreach.Candidate{outreachCandidate()}}, &outreachModel{output: outreachAnswer}).
+		outreach(`{"program":{"name":"P","focus_areas":["pendidikan"]},"emails":false}`)
+	if !strings.Contains(clean.Body.String(), `"warnings":[]`) || !strings.Contains(clean.Body.String(), `"term_coverage":[]`) {
+		t.Errorf("empty warnings and coverage must be lists: %s", clean.Body.String())
+	}
+}
+
+func TestOutreach_NoProspectsExplainsTheCriteria(t *testing.T) {
+	terms := []outreach.TermCoverage{{Kind: "region", Term: "Papua", Recognized: true, Companies: 0}}
+	s := outreachServer(t, outreachSource{terms: terms}, &outreachModel{output: outreachAnswer})
+	body := expectError(t, s.outreach(outreachBody), http.StatusUnprocessableEntity, "no_prospects")
+	if !strings.Contains(body.Error, `wilayah "Papua"`) {
+		t.Errorf("the reason must reach the caller: %q", body.Error)
 	}
 }

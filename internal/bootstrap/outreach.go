@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/HumanInitiative/agent-harness-go/internal/adapters/outbound/csrprospects"
+	"github.com/HumanInitiative/agent-harness-go/internal/adapters/outbound/hiprograms"
 	"github.com/HumanInitiative/agent-harness-go/internal/adapters/outbound/reportdocx"
 	"github.com/HumanInitiative/agent-harness-go/internal/application/prospecting"
 	"github.com/HumanInitiative/agent-harness-go/internal/platform/config"
@@ -25,6 +26,15 @@ func NewOutreachService(cfg config.OutreachConfig, store *csr.Store, minConfiden
 	svc, err := prospecting.NewService(source, model, []outbound.DraftRenderer{reportdocx.New()}, pc, log)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: outreach service: %w", err)
+	}
+	if cfg.ProgramsFile != "" {
+		// Every program is validated now, so a mistake in the file stops the
+		// harness from starting instead of surfacing as an odd shortlist.
+		catalog, err := hiprograms.Load(cfg.ProgramsFile)
+		if err != nil {
+			return nil, fmt.Errorf("bootstrap: OUTREACH_PROGRAMS_FILE: %w", err)
+		}
+		svc.WithCatalog(catalog)
 	}
 	return svc, nil
 }

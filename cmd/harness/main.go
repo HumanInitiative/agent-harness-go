@@ -142,7 +142,8 @@ func run() error {
 				return fmt.Errorf("initialize outreach: %w", err)
 			}
 			outreachHandler = httpapi.NewOutreachHandler(outreachService, log)
-			log.Info("outreach endpoint enabled", "formats", outreachService.Formats(),
+			catalog, _ := outreachService.Catalog(ctx)
+			log.Info("outreach endpoint enabled", "formats", outreachService.Formats(), "catalog_programs", len(catalog),
 				"cost_estimate", cfg.Outreach.InputRupiahPerMillion > 0 || cfg.Outreach.OutputRupiahPerMillion > 0)
 		}
 		log.Info("CSR tools enabled", "db", cfg.CSR.DBPath, "on_demand", cfg.CSR.OnDemandEnabled)

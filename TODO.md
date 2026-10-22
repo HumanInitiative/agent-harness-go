@@ -161,9 +161,14 @@ needs real index data, a Gemini key and the program team. Same rule as pilot
 ### Needs the program team
 
 - [ ] Real Human Initiative programs (name, description, focus areas, regions,
-      types), 3 to 5 to start. They are sent in the request today; decide
-      whether they should come from a list (the donation API has programs, but
-      not their focus areas) or a file in `config/`.
+      types), 3 to 5 to start, written into `config/hi-programs.yaml`
+      (start from `config/hi-programs.example.yaml`, set
+      `OUTREACH_PROGRAMS_FILE`). Use the fields from
+      `GET /api/v1/outreach/vocabulary`; a term outside them only matches the
+      exact same words, and the response says so in `warnings`.
+- [ ] Say which criteria beyond focus, region and type the team wants: the
+      amount needed, timing, number of beneficiaries. None affects the score
+      today.
 - [ ] Rate relevance: run `csrctl shortlist -csv` for 3 or more real programs
       and have the Penanggung Jawab fill the sheet for about 30 companies.
       Target: at least 70% relevant. Tune `internal/websearch/csr/score.go`

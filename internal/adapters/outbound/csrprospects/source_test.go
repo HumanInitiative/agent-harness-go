@@ -165,3 +165,48 @@ func TestProspects_ProgramRegionsChangeTheScore(t *testing.T) {
 		t.Errorf("scores must follow the program's regions: %d vs %d", inRegion.Candidates[0].Score, elsewhere.Candidates[0].Score)
 	}
 }
+
+func TestProspects_TermCoverageSpansTheWholeIndex(t *testing.T) {
+	src, store := newSource(t)
+	seed(t, store, "PT Contoh Energi", true, education("https://contohenergi.co.id/csr"))
+	seed(t, store, "PT Sehat Sentosa", true, csr.Extraction{
+		Evidence: []csr.Evidence{{URL: "https://sehat.co.id/csr", Excerpt: "Pemeriksaan kesehatan gratis", Kind: csr.KindCSRProgram, FetchedAt: now}},
+		Profile:  csr.Profile{FocusAreas: []csr.Claim{claim("kesehatan", 0)}, Regions: []csr.Claim{claim("Seluruh Indonesia", 0)}, ModelConfidence: 0.9},
+		ReadURLs: []string{"https://sehat.co.id/csr"},
+	})
+	p := program()
+	p.FocusAreas = []string{"pendidikan", "olahraga"}
+	p.Regions = []string{"Jawa Barat", "Papua"}
+	got, err := src.Prospects(context.Background(), p, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byTerm := map[string]outreach.TermCoverage{}
+	for _, tc := range got.Terms {
+		byTerm[tc.Kind+":"+tc.Term] = tc
+	}
+	// The cut to one company does not hide the other from the coverage.
+	if c := byTerm["focus:pendidikan"]; !c.Recognized || c.Group != "pendidikan" || c.Companies != 1 {
+		t.Errorf("pendidikan: %+v", c)
+	}
+	if c := byTerm["focus:olahraga"]; c.Recognized || c.Companies != 0 {
+		t.Errorf("olahraga: %+v", c)
+	}
+	if c := byTerm["region:Jawa Barat"]; c.Companies != 2 { // one by name, one nationwide
+		t.Errorf("Jawa Barat: %+v", c)
+	}
+	if c := byTerm["region:Papua"]; c.Companies != 1 {
+		t.Errorf("Papua (only the nationwide company): %+v", c)
+	}
+	if c := byTerm["type:beasiswa"]; !c.Recognized || c.Group != "pendidikan" {
+		t.Errorf("beasiswa: %+v", c)
+	}
+}
+
+func TestFocusGroups(t *testing.T) {
+	src, _ := newSource(t)
+	groups := src.FocusGroups()
+	if len(groups) < 5 || groups[0].Name != "pendidikan" || len(groups[0].Synonyms) == 0 {
+		t.Errorf("groups = %+v", groups)
+	}
+}

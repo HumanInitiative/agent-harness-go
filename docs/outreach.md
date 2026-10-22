@@ -18,14 +18,57 @@ to appear on the company's own pages. The model only words the email, and
 every claim in it must cite evidence the index holds. What the checks cannot
 confirm becomes a note for the reviewer instead of being trusted.
 
+## Describing the program
+
+A request names a program of the catalog or describes one inline, not both:
+
+```json
+{"program_id": "beasiswa-anak-desa"}
+{"program": {"name": "...", "focus_areas": ["pendidikan"], "regions": ["Jawa Barat"], "program_types": ["beasiswa"]}}
+```
+
+**The catalog** is a YAML file of Human Initiative's programs
+(`OUTREACH_PROGRAMS_FILE`, start from `config/hi-programs.example.yaml`), so
+people pick a program instead of retyping its criteria.
+`GET /api/v1/outreach/programs` lists it. The file is read when the harness
+starts and every program in it is checked then (an id that is not lowercase
+letters, digits and dashes, a repeated id, a program without a name or a focus
+area, an unknown field): a mistake stops the harness with a message naming the
+program, rather than surfacing later as an odd shortlist. A change to the file
+needs a restart.
+
+**What a program may say.** Focus areas and program types are matched through
+the fields the scoring understands: "beasiswa", "sekolah" and "pendidikan" are
+the same field, "stunting" and "kesehatan" another. `GET
+/api/v1/outreach/vocabulary` lists them with the words that count as each (the
+list is `FocusGroups` in `internal/websearch/csr/score.go`). A term outside
+them still works but matches only companies using exactly the same words. A
+region is free text (a province or a district; common abbreviations such as
+"Jabar" are understood), and a company that says it works nationwide counts
+as covering any region.
+
+**Feedback on the criteria.** Every response carries `term_coverage`: for each
+focus area, region and program type, how many indexed companies match it, and
+whether the scoring recognises the term. `warnings` turns the problems into
+sentences: a term the scoring does not know (with the ones it does), and any
+term no indexed company matches. An empty result (422 `no_prospects`) carries
+the same sentences, so a typo or a field the index does not cover yet is
+visible instead of silent. The warnings also open the Word file and the
+`csrctl shortlist` output.
+
+What a program cannot express yet: the amount needed, its timing, or how many
+people it reaches; none of them affects the score.
+
 ## Flow
 
 ```
-POST /api/v1/outreach  {program, limit?, emails?, format?}
+POST /api/v1/outreach  {program_id | program, limit?, emails?, format?}
    |
    |-- csrprospects ---------> score every indexed company against THIS program
    |        focus area must match (region or a proposal channel alone is not a fit);
    |        current data before stale, trusted before doubtful, then score
+   |-- term coverage --------> per focus area / region / type: how many companies match,
+   |                           recognised or not; warnings for the rest
    |-- notes from the index -> unverified, stale data, low confidence, no proposal
    |                           channel, "not seeking partners", no active program
    |-- model, one call per company (4 at a time, no model call when emails=false)
