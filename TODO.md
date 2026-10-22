@@ -222,10 +222,12 @@ needs real index data, a Gemini key and the program team. Same rule as pilot
 - [ ] Apply GitHub settings: `REQUIRED_APPROVALS=0 scripts/github-setup.sh`
       while there is a single maintainer (no ruleset is active yet, so
       direct pushes to `main` are still possible).
-- [ ] Open Dependabot PRs need `@dependabot rebase` to pick up the
-      commit-check fix, then review: #1 and #2 are major bumps of
-      `actions/checkout` and `actions/setup-go`, #3 moves the build image to
-      Go 1.27, #4 is superseded by the module updates already on `main`.
+- [ ] Decide whether to move to Go 1.27 (`golang:1.27-alpine` exists, 1.27.3).
+      Dependabot closed its PR for the image (#3) saying the image was up to
+      date, so it will not propose it again. The `go` directive in `go.mod`
+      and the toolchain CI tests with are 1.26, so bump the directive, CI and
+      the Dockerfile together in one change; changing only the image would
+      ship a binary built with a different Go than the tests ran on.
 - [ ] Alert on crawl health: the harness logs "web metrics" every
       `WEB_METRICS_LOG_MINUTES` and every csrctl run prints its web summary
       (fetch ok/failed/blocked, search ok/failed); hook a log-based alert to
