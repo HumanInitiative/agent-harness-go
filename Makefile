@@ -1,4 +1,4 @@
-.PHONY: help setup hooks run build test test-race cover fmt vet lint swagger swagger-check tools tidy check-conventions ci docker-build clean
+.PHONY: help setup hooks run mock-api build test test-race cover fmt vet lint swagger swagger-check tools tidy check-conventions ci docker-build clean
 
 BINARY       := bin/harness
 SWAG_VERSION := v1.16.6
@@ -20,6 +20,10 @@ hooks:
 ## run: start the harness locally (export the variables from .env first)
 run:
 	go run ./cmd/harness
+
+## mock-api: serve invented donation data and activity documents on :8090 (for REPORT_API_URL)
+mock-api:
+	go run ./cmd/mockdonationapi
 
 ## build: compile a static binary into bin/
 build:
