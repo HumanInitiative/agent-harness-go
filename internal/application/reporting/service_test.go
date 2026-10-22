@@ -43,7 +43,7 @@ func (m *scriptedModel) Generate(_ context.Context, req outbound.GenerateRequest
 		return outbound.GenerateResponse{}, m.err
 	}
 	i := min(len(m.requests)-1, len(m.outputs)-1)
-	return outbound.GenerateResponse{Output: m.outputs[i]}, nil
+	return outbound.GenerateResponse{Output: m.outputs[i], Usage: outbound.Usage{InputTokens: 100, OutputTokens: 20}}, nil
 }
 
 type fakeRenderer struct{}
@@ -321,6 +321,9 @@ func TestGenerate_WritesAnAuditLine(t *testing.T) {
 	if line["key_id"] != "a1b2c3d4e5f6" || line["program"] != reportdata.SampleProgramID ||
 		line["from"] != "2026-01-01" || line["to"] != "2026-03-31" {
 		t.Errorf("audit line = %v", line)
+	}
+	if line["input_tokens"] != float64(100) || line["output_tokens"] != float64(20) {
+		t.Errorf("token usage missing from the audit line: %v", line)
 	}
 	read, _ := line["documents_read"].([]any)
 	cited, _ := line["documents_cited"].([]any)

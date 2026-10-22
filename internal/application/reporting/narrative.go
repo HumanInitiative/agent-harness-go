@@ -31,7 +31,8 @@ type narrativeJSON struct {
 
 // writeNarratives asks the model for the narrative sections, giving it the
 // reason when an answer is rejected and allowing Config.Attempts tries.
-func (s *Service) writeNarratives(ctx context.Context, f report.Figures, docs []report.Document) ([]report.Narrative, error) {
+func (s *Service) writeNarratives(ctx context.Context, f report.Figures, docs []report.Document) ([]report.Narrative, outbound.Usage, error) {
+	var used outbound.Usage
 	messages := []conversation.Message{{Role: conversation.RoleUser, Content: buildPrompt(f, docs)}}
 	names := map[string]bool{}
 	for _, d := range docs {
@@ -43,12 +44,13 @@ func (s *Service) writeNarratives(ctx context.Context, f report.Figures, docs []
 		resp, err := s.model.Generate(ctx, outbound.GenerateRequest{
 			SystemPrompt: systemPrompt, Messages: messages, MaxTurns: 1,
 		})
+		used = used.Add(resp.Usage)
 		if err != nil {
-			return nil, fmt.Errorf("write narrative: %w", err)
+			return nil, used, fmt.Errorf("write narrative: %w", err)
 		}
 		narratives, err := parseNarratives(resp.Output, names)
 		if err == nil {
-			return narratives, nil
+			return narratives, used, nil
 		}
 		lastErr = err
 		s.log.WarnContext(ctx, "narrative rejected", "attempt", attempt, "reason", err)
@@ -58,7 +60,7 @@ func (s *Service) writeNarratives(ctx context.Context, f report.Figures, docs []
 				". Answer again with the one JSON object only."},
 		)
 	}
-	return nil, fmt.Errorf("%w: %v", ErrNarrativeRejected, lastErr)
+	return nil, used, fmt.Errorf("%w: %v", ErrNarrativeRejected, lastErr)
 }
 
 func buildPrompt(f report.Figures, docs []report.Document) string {

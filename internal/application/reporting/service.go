@@ -143,7 +143,7 @@ func (s *Service) Generate(ctx context.Context, in Input) (report.Draft, error) 
 		return report.Draft{}, ErrNoDocuments
 	}
 
-	narratives, err := s.writeNarratives(ctx, figures, docs)
+	narratives, used, err := s.writeNarratives(ctx, figures, docs)
 	if err != nil {
 		return report.Draft{}, err
 	}
@@ -162,7 +162,9 @@ func (s *Service) Generate(ctx context.Context, in Input) (report.Draft, error) 
 		"to", in.To.Format("2006-01-02"),
 		"documents_read", documentNames(docs),
 		"documents_cited", draft.Sources,
-		"review_notes", len(notes))
+		"review_notes", len(notes),
+		"input_tokens", used.InputTokens,
+		"output_tokens", used.OutputTokens)
 	return draft, nil
 }
 

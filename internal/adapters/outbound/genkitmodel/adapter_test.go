@@ -367,3 +367,26 @@ func TestExtractJSON_RejectsBadSchemaAndClassifiesErrors(t *testing.T) {
 		t.Fatalf("expected ErrModelUnavailable, got %v", err)
 	}
 }
+
+func TestGenerate_ReportsTokenUsage(t *testing.T) {
+	adapter, _ := newTestAdapter(t, func(*ai.ModelRequest) (*ai.ModelResponse, error) {
+		resp := textResponse("ok")
+		resp.Usage = &ai.GenerationUsage{InputTokens: 120, OutputTokens: 30}
+		return resp, nil
+	})
+	got, err := adapter.Generate(context.Background(), outbound.GenerateRequest{
+		Messages: []conversation.Message{{Role: conversation.RoleUser, Content: "hi"}}, MaxTurns: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Usage != (outbound.Usage{InputTokens: 120, OutputTokens: 30}) {
+		t.Errorf("Usage = %+v", got.Usage)
+	}
+}
+
+func TestUsageAdd(t *testing.T) {
+	if got := (outbound.Usage{InputTokens: 1, OutputTokens: 2}).Add(outbound.Usage{InputTokens: 10, OutputTokens: 20}); got != (outbound.Usage{InputTokens: 11, OutputTokens: 22}) {
+		t.Errorf("Add = %+v", got)
+	}
+}

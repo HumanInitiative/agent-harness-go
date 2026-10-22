@@ -50,6 +50,17 @@ type ToolCallRecord struct {
 	DurationMS int64
 }
 
+// Usage is what a model call consumed, for cost accounting.
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+}
+
+// Add returns the sum of two usages.
+func (u Usage) Add(o Usage) Usage {
+	return Usage{InputTokens: u.InputTokens + o.InputTokens, OutputTokens: u.OutputTokens + o.OutputTokens}
+}
+
 // GenerateResponse is the outcome of one ModelPort.Generate call.
 type GenerateResponse struct {
 	// Output is the model's final natural-language answer, after every tool
@@ -57,6 +68,10 @@ type GenerateResponse struct {
 	Output string
 	// ToolCalls records every tool invocation made while producing Output.
 	ToolCalls []ToolCallRecord
+	// Usage is the token count the provider reported. It is exact for a
+	// call without tools; with tools it covers the final model turn only.
+	// Zero when the provider reported nothing.
+	Usage Usage
 }
 
 // ModelPort is the boundary to whatever LLM SDK actually runs generation.

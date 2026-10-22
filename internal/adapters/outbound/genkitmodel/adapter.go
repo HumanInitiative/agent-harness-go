@@ -108,10 +108,14 @@ func (a *Adapter) Generate(ctx context.Context, req outbound.GenerateRequest) (o
 		return outbound.GenerateResponse{}, classifyError(ctx, err)
 	}
 
-	return outbound.GenerateResponse{
+	out := outbound.GenerateResponse{
 		Output:    resp.Text(),
 		ToolCalls: recorder.records(),
-	}, nil
+	}
+	if resp.Usage != nil {
+		out.Usage = outbound.Usage{InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens}
+	}
+	return out, nil
 }
 
 // classifyError maps a Genkit failure onto the error contract documented
