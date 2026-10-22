@@ -73,6 +73,20 @@ definitions:
         example: 5b1f6c9e-7a0d-4c7e-8f5e-2d9a1c3b4e6f
         type: string
     type: object
+  httpapi.FocusGroupDTO:
+    properties:
+      also_recognized:
+        description: AlsoRecognized are other words that count as the same field.
+        example:
+        - beasiswa
+        - sekolah
+        items:
+          type: string
+        type: array
+      name:
+        example: pendidikan
+        type: string
+    type: object
   httpapi.OutreachCompanyDTO:
     properties:
       domain:
@@ -191,6 +205,12 @@ definitions:
         items:
           type: string
         type: array
+      id:
+        description: |-
+          ID names the program in the catalog. Set when listing the catalog;
+          ignored in a request, which uses program_id for that.
+        example: beasiswa-anak-desa
+        type: string
       name:
         description: Name of the program. Required.
         example: Beasiswa Anak Desa
@@ -244,7 +264,15 @@ definitions:
         example: 10
         type: integer
       program:
-        $ref: '#/definitions/httpapi.OutreachProgramDTO'
+        allOf:
+        - $ref: '#/definitions/httpapi.OutreachProgramDTO'
+        description: Program describes the program in the request itself.
+      program_id:
+        description: |-
+          ProgramID picks a program of the catalog (GET /api/v1/outreach/programs).
+          Give this or Program, not both.
+        example: beasiswa-anak-desa
+        type: string
     type: object
   httpapi.OutreachResponse:
     properties:
@@ -257,8 +285,23 @@ definitions:
         type: string
       program:
         $ref: '#/definitions/httpapi.OutreachProgramDTO'
+      term_coverage:
+        description: |-
+          TermCoverage says, for each focus area, region and program type, how
+          many indexed companies match it.
+        items:
+          $ref: '#/definitions/httpapi.TermCoverageDTO'
+        type: array
       trace:
         $ref: '#/definitions/httpapi.OutreachTraceDTO'
+      warnings:
+        description: |-
+          Warnings are problems with the program's criteria that make the
+          shortlist shorter or poorer than hoped: a focus area the scoring does
+          not know, or a term no indexed company matches.
+        items:
+          type: string
+        type: array
     type: object
   httpapi.OutreachTraceDTO:
     properties:
@@ -278,6 +321,19 @@ definitions:
         type: integer
       output_tokens:
         type: integer
+    type: object
+  httpapi.OutreachVocabularyResponse:
+    properties:
+      focus_areas:
+        description: |-
+          FocusAreas are the fields the scoring understands. A focus area or
+          program type may use the name or any word listed under it.
+        items:
+          $ref: '#/definitions/httpapi.FocusGroupDTO'
+        type: array
+      note:
+        description: 'Note explains the rest: regions are free text.'
+        type: string
     type: object
   httpapi.ProgramDTO:
     properties:
@@ -347,6 +403,32 @@ definitions:
     properties:
       status:
         example: ok
+        type: string
+    type: object
+  httpapi.TermCoverageDTO:
+    properties:
+      companies:
+        description: Companies is how many indexed companies match the term.
+        example: 12
+        type: integer
+      group:
+        description: Group is the known field the term maps to; empty when not recognized.
+        example: pendidikan
+        type: string
+      kind:
+        enum:
+        - focus
+        - region
+        - type
+        example: focus
+        type: string
+      recognized:
+        description: |-
+          Recognized is false for a focus area or program type the scoring does
+          not know; it then only matches companies using the same words.
+        type: boolean
+      term:
+        example: pendidikan
         type: string
     type: object
   httpapi.ToolCallDTO:
@@ -503,6 +585,58 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Shortlist companies that may fund a program, with draft approach emails
+      tags:
+      - outreach
+  /api/v1/outreach/programs:
+    get:
+      description: |-
+        The programs in the catalog file (OUTREACH_PROGRAMS_FILE). Send one's id as program_id
+        instead of describing the program again.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/httpapi.OutreachProgramDTO'
+            type: array
+        "401":
+          description: 'unauthorized: missing or invalid X-API-Key'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "429":
+          description: 'rate_limited: see Retry-After header'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List the Human Initiative programs that can be shortlisted for
+      tags:
+      - outreach
+  /api/v1/outreach/vocabulary:
+    get:
+      description: |-
+        The focus areas the scoring understands and the words that count as each. Terms outside
+        them still work, but only match companies that use exactly the same words.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpapi.OutreachVocabularyResponse'
+        "401":
+          description: 'unauthorized: missing or invalid X-API-Key'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "429":
+          description: 'rate_limited: see Retry-After header'
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List the fields of work a program's criteria may use
       tags:
       - outreach
   /api/v1/programs:

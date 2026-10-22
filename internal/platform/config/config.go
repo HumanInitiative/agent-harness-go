@@ -78,6 +78,10 @@ type OutreachConfig struct {
 	// Enabled mounts POST /api/v1/outreach. It reads the CSR index, so it
 	// needs CSR_TOOLS_ENABLED=true.
 	Enabled bool
+	// ProgramsFile lists Human Initiative's programs (YAML), so a request can
+	// name one by id. Empty means no catalog: programs are described in
+	// each request.
+	ProgramsFile string
 	// InputRupiahPerMillion and OutputRupiahPerMillion are the model's
 	// token prices in rupiah per million tokens, used to estimate what a run
 	// cost. Zero means unknown: runs then report tokens but no cost.
@@ -350,8 +354,12 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 	}
 	cfg.Outreach = OutreachConfig{
 		Enabled:                r.boolean("OUTREACH_ENABLED", false),
+		ProgramsFile:           r.str("OUTREACH_PROGRAMS_FILE", ""),
 		InputRupiahPerMillion:  r.nonNegativeFloat("MODEL_INPUT_RUPIAH_PER_MILLION_TOKENS", 0),
 		OutputRupiahPerMillion: r.nonNegativeFloat("MODEL_OUTPUT_RUPIAH_PER_MILLION_TOKENS", 0),
+	}
+	if cfg.Outreach.ProgramsFile != "" && !cfg.Outreach.Enabled {
+		r.fail("OUTREACH_PROGRAMS_FILE is set but OUTREACH_ENABLED is not true")
 	}
 	if cfg.Outreach.Enabled && !cfg.CSR.ToolsEnabled {
 		r.fail("OUTREACH_ENABLED=true needs CSR_TOOLS_ENABLED=true: the shortlist reads the CSR index")

@@ -121,4 +121,30 @@ func TestShortlistCommand_Errors(t *testing.T) {
 		!strings.Contains(out.String(), "No indexed company fits") {
 		t.Errorf("no fit must say so, not fail: %v %q", err, out.String())
 	}
+	// ...and says why: the term is not one the scoring knows.
+	if !strings.Contains(out.String(), "Check the program's criteria:") || !strings.Contains(out.String(), `Bidang "olahraga" bukan salah satu yang dikenali`) {
+		t.Errorf("the criteria warning is missing: %q", out.String())
+	}
+}
+
+func TestShortlistCommand_WarningsStayOutOfTheCSV(t *testing.T) {
+	prog := writeProgram(t, "program:\n  name: P\n  focus_areas: [pendidikan, olahraga]\n")
+	var out bytes.Buffer
+	if err := cmdShortlist(context.Background(), config.CrawlerConfig{}, shortlistStore(t), []string{"-program", prog, "-csv"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "criteria") {
+		t.Errorf("warnings leaked into the CSV:\n%s", out.String())
+	}
+	if _, err := csv.NewReader(&out).ReadAll(); err != nil {
+		t.Errorf("not valid CSV: %v", err)
+	}
+	// A table, on the other hand, carries the warning above the rows.
+	out.Reset()
+	if err := cmdShortlist(context.Background(), config.CrawlerConfig{}, shortlistStore(t), []string{"-program", prog}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `Bidang "olahraga"`) || !strings.Contains(out.String(), "PT Contoh Energi") {
+		t.Errorf("table:\n%s", out.String())
+	}
 }

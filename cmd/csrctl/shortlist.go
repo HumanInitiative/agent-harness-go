@@ -88,16 +88,25 @@ func cmdShortlist(ctx context.Context, cfg config.CrawlerConfig, store *csr.Stor
 	if ip, err := bootstrap.LoadInstitutionProfile(cfg.CSR); err == nil && ip.MinConfidence > 0 {
 		minConfidence = ip.MinConfidence
 	}
-	found, err := csrprospects.New(store, minConfidence, csr.IndexOptions{StaleAfter: cfg.CSR.StaleAfter}).Prospects(ctx, program, *limit)
+	source := csrprospects.New(store, minConfidence, csr.IndexOptions{StaleAfter: cfg.CSR.StaleAfter})
+	found, err := source.Prospects(ctx, program, *limit)
 	if err != nil {
 		return err
 	}
+	warnings := outreach.Warnings(found.Terms, source.FocusGroups())
+	if *asCSV {
+		// The sheet goes to stdout; what is wrong with the criteria must not
+		// end up inside it.
+		writeWarnings(os.Stderr, warnings)
+		if len(found.Candidates) == 0 {
+			return errors.New("no indexed company fits this program: none has a matching focus area")
+		}
+		return writeRatingSheet(out, found.Candidates)
+	}
+	writeWarnings(out, warnings)
 	if len(found.Candidates) == 0 {
 		fmt.Fprintln(out, "No indexed company fits this program: none has a matching focus area. Is the index crawled?")
 		return nil
-	}
-	if *asCSV {
-		return writeRatingSheet(out, found.Candidates)
 	}
 
 	fmt.Fprintf(out, "%s: %d of %d fitting companies\n\n", program.Name, len(found.Candidates), found.Fitting)
@@ -107,6 +116,17 @@ func cmdShortlist(ctx context.Context, cfg config.CrawlerConfig, store *csr.Stor
 		fmt.Fprintf(w, "%d\t%d\t%s\t%d\t%s\t%s\t%s\t%s\n", i+1, c.CompanyID, c.Name, c.Score, reviewLabel(c), dataLabel(c), dash(c.ProposalChannel), firstReason(c))
 	}
 	return w.Flush()
+}
+
+func writeWarnings(w io.Writer, warnings []string) {
+	if len(warnings) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Check the program's criteria:")
+	for _, msg := range warnings {
+		fmt.Fprintln(w, "  - "+msg)
+	}
+	fmt.Fprintln(w)
 }
 
 func writeRatingSheet(out io.Writer, candidates []outreach.Candidate) error {

@@ -75,15 +75,116 @@ var nationwide = []string{"nasional", "national", "nationwide", "seluruh indones
 
 // concept reduces a focus or program term to its group name, or to itself.
 func concept(term string) string {
+	c, _ := focusGroup(term)
+	return c
+}
+
+// focusGroup reduces a term to its group name and says whether it belongs to
+// a known group. An unknown term stays itself and only matches a company
+// that uses the same words.
+func focusGroup(term string) (string, bool) {
 	hay := words(term)
 	for _, g := range focusGroups {
 		for _, syn := range g {
 			if contains(hay, syn) {
-				return g[0]
+				return g[0], true
 			}
 		}
 	}
-	return strings.TrimSpace(hay)
+	return strings.TrimSpace(hay), false
+}
+
+// FocusGroup is a field of work the scoring understands, with the other
+// words that count as the same field.
+type FocusGroup struct {
+	Name     string
+	Synonyms []string
+}
+
+// FocusGroups lists the fields of work the scoring understands.
+func FocusGroups() []FocusGroup {
+	out := make([]FocusGroup, 0, len(focusGroups))
+	for _, g := range focusGroups {
+		out = append(out, FocusGroup{Name: g[0], Synonyms: append([]string(nil), g[1:]...)})
+	}
+	return out
+}
+
+// Kinds of term a program is described by.
+const (
+	TermFocus  = "focus"
+	TermRegion = "region"
+	TermType   = "type"
+)
+
+// TermCount says how well one term of the institution profile is covered by
+// the indexed companies, so a typo or a field nobody in the index works in
+// shows up instead of silently giving an empty shortlist.
+type TermCount struct {
+	Kind string
+	Term string
+	// Group is the known field the term maps to, for focus areas and
+	// program types; empty when Recognized is false.
+	Group string
+	// Recognized is false for a focus area or program type that is not a
+	// known field: it then only matches companies that use the same words.
+	// Regions are free text and always count as recognized.
+	Recognized bool
+	// Companies is how many of the given prospects work in this field, in
+	// this region, or offer this type of program.
+	Companies int
+}
+
+// Coverage counts, for every term of the profile, the prospects whose
+// extracted profile matches it. Prospects without a profile match nothing.
+func (ip InstitutionProfile) Coverage(prospects []Prospect) []TermCount {
+	var out []TermCount
+	count := func(kind, term string, matches func(*Profile) bool) {
+		group, known := focusGroup(term)
+		tc := TermCount{Kind: kind, Term: term, Recognized: true}
+		if kind != TermRegion {
+			tc.Recognized = known
+			if known {
+				tc.Group = group
+			}
+		}
+		for _, p := range prospects {
+			if p.Profile != nil && matches(p.Profile) {
+				tc.Companies++
+			}
+		}
+		out = append(out, tc)
+	}
+	for _, t := range ip.FocusAreas {
+		c := concept(t)
+		count(TermFocus, t, func(p *Profile) bool {
+			return anyClaimConcept(p.FocusAreas, c) || anyClaimConcept(p.ProgramTypes, c)
+		})
+	}
+	for _, t := range ip.Regions {
+		count(TermRegion, t, func(p *Profile) bool {
+			for _, cl := range p.Regions {
+				if regionMatches(cl.Value, t) || isNationwide(cl.Value) {
+					return true
+				}
+			}
+			return false
+		})
+	}
+	for _, t := range ip.ProgramTypes {
+		c := concept(t)
+		count(TermType, t, func(p *Profile) bool { return anyClaimConcept(p.ProgramTypes, c) })
+	}
+	return out
+}
+
+func anyClaimConcept(claims []Claim, c string) bool {
+	for _, cl := range claims {
+		if concept(cl.Value) == c {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeRegion lowercases a region and expands abbreviations word by

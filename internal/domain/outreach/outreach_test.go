@@ -188,3 +188,61 @@ func TestShortlistDraft_StaleAndVerified(t *testing.T) {
 		t.Errorf("stale/verified not shown:\n%s", out)
 	}
 }
+
+func TestWarnings(t *testing.T) {
+	groups := []outreach.FocusGroup{{Name: "pendidikan"}, {Name: "kesehatan"}}
+	got := outreach.Warnings([]outreach.TermCoverage{
+		{Kind: "focus", Term: "pendidikan", Recognized: true, Companies: 12},                   // fine
+		{Kind: "focus", Term: "olahraga", Recognized: false, Companies: 0},                     // unknown, nobody
+		{Kind: "type", Term: "pameran", Recognized: false, Companies: 3},                       // unknown, a few use the words
+		{Kind: "focus", Term: "kesehatan", Group: "kesehatan", Recognized: true, Companies: 0}, // known, nobody works in it
+		{Kind: "region", Term: "Papua", Recognized: true, Companies: 0},
+		{Kind: "type", Term: "beasiswa", Group: "pendidikan", Recognized: true, Companies: 0},
+		{Kind: "region", Term: "Jawa Barat", Recognized: true, Companies: 4},
+	}, groups)
+	want := []string{
+		`Bidang "olahraga" bukan salah satu yang dikenali sistem (pendidikan, kesehatan). Ia hanya cocok dengan perusahaan yang memakai kata yang sama persis: belum ada perusahaan di indeks yang memakainya. Periksa ejaannya, atau pakai istilah yang dikenali.`,
+		`Jenis dukungan "pameran" bukan salah satu yang dikenali sistem (pendidikan, kesehatan). Ia hanya cocok dengan perusahaan yang memakai kata yang sama persis: 3 perusahaan di indeks memakainya. Periksa ejaannya, atau pakai istilah yang dikenali.`,
+		`Belum ada perusahaan di indeks yang bekerja di bidang "kesehatan".`,
+		`Belum ada perusahaan di indeks yang menyebut wilayah "Papua" atau berskala nasional.`,
+		`Belum ada perusahaan di indeks yang menjalankan program jenis "beasiswa".`,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d warnings, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("warning %d:\n got  %s\n want %s", i, got[i], want[i])
+		}
+	}
+	if len(outreach.Warnings(nil, groups)) != 0 {
+		t.Error("no terms, no warnings")
+	}
+}
+
+func TestProgramID(t *testing.T) {
+	for id, ok := range map[string]bool{"beasiswa-anak-desa": true, "a": true, "p2": true, "": false, "-x": false, "Beasiswa": false, "a b": false, "a/b": false, "../x": false} {
+		if outreach.ValidProgramID(id) != ok {
+			t.Errorf("ValidProgramID(%q) = %v, want %v", id, !ok, ok)
+		}
+	}
+	if got := (outreach.Program{ID: " p1 ", Name: "A", FocusAreas: []string{"x"}}).Clean().ID; got != "p1" {
+		t.Errorf("Clean must trim the id: %q", got)
+	}
+}
+
+func TestShortlistDraft_ShowsCriteriaWarnings(t *testing.T) {
+	s := shortlist(nil, nil)
+	s.Warnings = []string{"Bidang \"olahraga\" bukan salah satu yang dikenali."}
+	out := s.Draft().Markdown()
+	if !strings.Contains(out, "**Perhatikan kriteria program:**") || !strings.Contains(out, "- Bidang \"olahraga\" bukan salah satu yang dikenali.") {
+		t.Errorf("warnings missing:\n%s", out)
+	}
+	if strings.Contains(shortlist(nil, nil).Draft().Markdown(), "Perhatikan kriteria") {
+		t.Error("no warnings, no section")
+	}
+	empty := outreach.Shortlist{Program: program(), GeneratedAt: day, Warnings: []string{"Papua kosong."}}.Draft().Markdown()
+	if !strings.Contains(empty, "Papua kosong.") || !strings.Contains(empty, "Tidak ada perusahaan") {
+		t.Errorf("an empty shortlist must still explain itself:\n%s", empty)
+	}
+}

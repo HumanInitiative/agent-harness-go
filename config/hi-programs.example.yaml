@@ -1,0 +1,29 @@
+# Human Initiative's programs that can be shortlisted for funders. Point
+# OUTREACH_PROGRAMS_FILE at a copy of this file (for example
+# config/hi-programs.yaml) and pick a program by id:
+#   POST /api/v1/outreach   {"program_id": "beasiswa-anak-desa"}
+# The file is read when the harness starts, and every program is checked
+# then: a mistake stops the harness with a message naming the program.
+#
+# These are EXAMPLES. Replace them with the real programs. The terms decide
+# which companies fit, so write them in the fields the scoring understands:
+#   GET /api/v1/outreach/vocabulary   (or see FocusGroups in
+#   internal/websearch/csr/score.go)
+programs:
+  - id: beasiswa-anak-desa          # lowercase letters, digits and dashes
+    name: Beasiswa Anak Desa
+    description: >-
+      Beasiswa dan pendampingan belajar untuk 120 anak di desa terpencil
+      Jawa Barat, selama satu tahun ajaran.
+    focus_areas: [pendidikan]       # at least one; companies are scored on it
+    regions: [Jawa Barat]           # free text; empty means anywhere
+    program_types: [beasiswa]       # the kind of support needed
+
+  - id: air-bersih-dusun
+    name: Air Bersih untuk Dusun
+    description: >-
+      Sumur dan jaringan air bersih untuk dusun yang kesulitan air saat
+      kemarau, di Banten dan Jawa Barat.
+    focus_areas: [air bersih, kesehatan]
+    regions: [Banten, Jawa Barat]
+    program_types: [infrastruktur]

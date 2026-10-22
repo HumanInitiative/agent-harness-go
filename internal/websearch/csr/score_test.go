@@ -141,3 +141,61 @@ func TestScore_FocusMatchIsSeparateFromTheScore(t *testing.T) {
 		t.Errorf("a focus match must be reported: %+v", m)
 	}
 }
+
+func TestFocusGroups(t *testing.T) {
+	groups := FocusGroups()
+	if len(groups) != len(focusGroups) || groups[0].Name != "pendidikan" {
+		t.Fatalf("groups = %+v", groups)
+	}
+	found := false
+	for _, s := range groups[0].Synonyms {
+		found = found || s == "beasiswa"
+	}
+	if !found {
+		t.Errorf("pendidikan must list beasiswa as a synonym: %v", groups[0].Synonyms)
+	}
+	// A caller cannot change the scoring by editing what it was given.
+	groups[0].Synonyms[0] = "diubah"
+	if focusGroups[0][1] == "diubah" {
+		t.Error("FocusGroups must return a copy")
+	}
+	if g, known := focusGroup("Beasiswa prestasi"); g != "pendidikan" || !known {
+		t.Errorf("focusGroup = %q, %v", g, known)
+	}
+	if g, known := focusGroup("Olahraga"); g != "olahraga" || known {
+		t.Errorf("an unknown term stays itself: %q, %v", g, known)
+	}
+}
+
+func TestCoverage(t *testing.T) {
+	ip := InstitutionProfile{
+		FocusAreas:   []string{"pendidikan", "olahraga"},
+		Regions:      []string{"Jawa Barat", "Papua"},
+		ProgramTypes: []string{"beasiswa", "pameran"},
+	}
+	education := Prospect{Profile: &Profile{
+		FocusAreas: claimsOf("Pendidikan anak"), Regions: claimsOf("Kabupaten Bandung, Jabar"), ProgramTypes: claimsOf("beasiswa prestasi"),
+	}}
+	health := Prospect{Profile: &Profile{FocusAreas: claimsOf("kesehatan"), Regions: claimsOf("Seluruh Indonesia")}}
+	// A company whose programs are scholarships works in education too.
+	scholarships := Prospect{Profile: &Profile{FocusAreas: claimsOf("CSR"), ProgramTypes: claimsOf("beasiswa")}}
+	noProfile := Prospect{}
+
+	got := map[string]TermCount{}
+	for _, tc := range ip.Coverage([]Prospect{education, health, scholarships, noProfile}) {
+		got[tc.Kind+":"+tc.Term] = tc
+	}
+	want := map[string]TermCount{
+		"focus:pendidikan":  {Kind: "focus", Term: "pendidikan", Group: "pendidikan", Recognized: true, Companies: 2},
+		"focus:olahraga":    {Kind: "focus", Term: "olahraga", Recognized: false, Companies: 0},
+		"region:Jawa Barat": {Kind: "region", Term: "Jawa Barat", Recognized: true, Companies: 2}, // Jabar, and nationwide counts
+		"region:Papua":      {Kind: "region", Term: "Papua", Recognized: true, Companies: 1},      // only the nationwide company
+		"type:beasiswa":     {Kind: "type", Term: "beasiswa", Group: "pendidikan", Recognized: true, Companies: 2},
+		"type:pameran":      {Kind: "type", Term: "pameran", Recognized: false, Companies: 0},
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("%s = %+v, want %+v", k, got[k], w)
+		}
+	}
+}

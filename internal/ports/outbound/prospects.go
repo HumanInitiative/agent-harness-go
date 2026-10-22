@@ -12,6 +12,9 @@ type Prospects struct {
 	Candidates []outreach.Candidate
 	// Fitting is how many companies fit the program before the cut.
 	Fitting int
+	// Terms says how each focus area, region and program type of the
+	// program is covered by the whole index (not only the cut).
+	Terms []outreach.TermCoverage
 }
 
 // ProspectSource finds the companies that may fund a program, from an
@@ -22,4 +25,17 @@ type ProspectSource interface {
 	// least one of its focus areas must match. An empty index or no fit is
 	// an empty result, not an error.
 	Prospects(ctx context.Context, program outreach.Program, limit int) (Prospects, error)
+
+	// FocusGroups lists the fields of work the scoring understands, so a
+	// person writing a program knows which terms are recognised.
+	FocusGroups() []outreach.FocusGroup
+}
+
+// OutreachPrograms is the catalog of Human Initiative programs that can be
+// shortlisted for, so a person picks one instead of retyping its criteria.
+type OutreachPrograms interface {
+	// Programs lists the catalog in the order it was written.
+	Programs(ctx context.Context) ([]outreach.Program, error)
+	// Program returns one by id, or ErrProgramNotFound.
+	Program(ctx context.Context, id string) (outreach.Program, error)
 }

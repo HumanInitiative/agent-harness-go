@@ -88,6 +88,8 @@ func NewRouter(chat *ChatHandler, log *slog.Logger, cfg RouterConfig) (http.Hand
 		api.Method(http.MethodPost, "/chat", chat)
 		if cfg.Outreach != nil {
 			api.Method(http.MethodPost, "/outreach", cfg.Outreach)
+			api.Get("/outreach/programs", cfg.Outreach.Catalog)
+			api.Get("/outreach/vocabulary", cfg.Outreach.Vocabulary)
 		}
 		if cfg.Reports != nil {
 			api.Method(http.MethodPost, "/reports", cfg.Reports)

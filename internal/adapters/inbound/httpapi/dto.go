@@ -100,6 +100,9 @@ type ProgramDTO struct {
 
 // OutreachProgramDTO is the Human Initiative program to find funders for.
 type OutreachProgramDTO struct {
+	// ID names the program in the catalog. Set when listing the catalog;
+	// ignored in a request, which uses program_id for that.
+	ID string `json:"id,omitempty" example:"beasiswa-anak-desa"`
 	// Name of the program. Required.
 	Name string `json:"name" example:"Beasiswa Anak Desa"`
 	// Description helps the model word the email; at most 3000 characters.
@@ -116,7 +119,11 @@ type OutreachProgramDTO struct {
 // OutreachRequest is the payload for POST /api/v1/outreach. Unknown fields
 // are rejected.
 type OutreachRequest struct {
-	Program OutreachProgramDTO `json:"program"`
+	// ProgramID picks a program of the catalog (GET /api/v1/outreach/programs).
+	// Give this or Program, not both.
+	ProgramID string `json:"program_id,omitempty" example:"beasiswa-anak-desa"`
+	// Program describes the program in the request itself.
+	Program *OutreachProgramDTO `json:"program,omitempty"`
 	// Limit is the number of companies, 1-25. Defaults to 10.
 	Limit int `json:"limit,omitempty" example:"10"`
 	// Emails asks for a draft email per company (the default). Set false
@@ -209,8 +216,44 @@ type OutreachTraceDTO struct {
 // OutreachResponse is the response body of POST /api/v1/outreach for the
 // json format.
 type OutreachResponse struct {
-	Program     OutreachProgramDTO `json:"program"`
-	GeneratedAt string             `json:"generated_at" example:"2026-10-22"`
-	Entries     []OutreachEntryDTO `json:"entries"`
-	Trace       OutreachTraceDTO   `json:"trace"`
+	Program OutreachProgramDTO `json:"program"`
+	// Warnings are problems with the program's criteria that make the
+	// shortlist shorter or poorer than hoped: a focus area the scoring does
+	// not know, or a term no indexed company matches.
+	Warnings []string `json:"warnings"`
+	// TermCoverage says, for each focus area, region and program type, how
+	// many indexed companies match it.
+	TermCoverage []TermCoverageDTO  `json:"term_coverage"`
+	GeneratedAt  string             `json:"generated_at" example:"2026-10-22"`
+	Entries      []OutreachEntryDTO `json:"entries"`
+	Trace        OutreachTraceDTO   `json:"trace"`
+}
+
+// TermCoverageDTO is how well one criterion of the program is covered.
+type TermCoverageDTO struct {
+	Kind string `json:"kind" enums:"focus,region,type" example:"focus"`
+	Term string `json:"term" example:"pendidikan"`
+	// Group is the known field the term maps to; empty when not recognized.
+	Group string `json:"group,omitempty" example:"pendidikan"`
+	// Recognized is false for a focus area or program type the scoring does
+	// not know; it then only matches companies using the same words.
+	Recognized bool `json:"recognized"`
+	// Companies is how many indexed companies match the term.
+	Companies int `json:"companies" example:"12"`
+}
+
+// FocusGroupDTO is a field of work the scoring understands.
+type FocusGroupDTO struct {
+	Name string `json:"name" example:"pendidikan"`
+	// AlsoRecognized are other words that count as the same field.
+	AlsoRecognized []string `json:"also_recognized" example:"beasiswa,sekolah"`
+}
+
+// OutreachVocabularyResponse lists what a program's criteria may use.
+type OutreachVocabularyResponse struct {
+	// FocusAreas are the fields the scoring understands. A focus area or
+	// program type may use the name or any word listed under it.
+	FocusAreas []FocusGroupDTO `json:"focus_areas"`
+	// Note explains the rest: regions are free text.
+	Note string `json:"note"`
 }

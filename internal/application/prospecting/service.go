@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,11 +27,28 @@ var (
 	// ErrInvalidInput means the program cannot be matched as given.
 	ErrInvalidInput = errors.New("invalid input")
 	// ErrNoProspects means no indexed company fits the program. The index
-	// may be empty or not yet crawled for this field.
+	// may be empty or not yet crawled for this field. The error is a
+	// *NoProspectsError carrying what is wrong with the program's criteria.
 	ErrNoProspects = errors.New("no company in the index fits this program")
 	// ErrUnknownFormat means no renderer exists for the requested format.
 	ErrUnknownFormat = errors.New("unknown shortlist format")
 )
+
+// NoProspectsError is ErrNoProspects with the reasons found in the program's
+// criteria (a term the scoring does not know, a region nobody covers).
+type NoProspectsError struct {
+	Warnings []string
+}
+
+func (e *NoProspectsError) Error() string {
+	if len(e.Warnings) == 0 {
+		return ErrNoProspects.Error()
+	}
+	return ErrNoProspects.Error() + ": " + strings.Join(e.Warnings, " ")
+}
+
+// Is makes errors.Is(err, ErrNoProspects) true.
+func (e *NoProspectsError) Is(target error) bool { return target == ErrNoProspects }
 
 // Config bounds one run.
 type Config struct {
@@ -61,6 +79,7 @@ func DefaultConfig() Config {
 // Service builds shortlists.
 type Service struct {
 	prospects outbound.ProspectSource
+	catalog   outbound.OutreachPrograms // optional
 	model     outbound.ModelPort
 	renderers map[string]outbound.DraftRenderer
 	cfg       Config
@@ -93,9 +112,34 @@ func NewService(prospects outbound.ProspectSource, model outbound.ModelPort, ren
 	return &Service{prospects: prospects, model: model, renderers: byFormat, cfg: cfg, log: log}, nil
 }
 
+// WithCatalog gives the service the catalog of Human Initiative programs, so
+// a request can name one by id. Without one, only inline programs work.
+func (s *Service) WithCatalog(catalog outbound.OutreachPrograms) *Service {
+	s.catalog = catalog
+	return s
+}
+
+// Catalog lists the Human Initiative programs that can be named by id.
+func (s *Service) Catalog(ctx context.Context) ([]outreach.Program, error) {
+	if s.catalog == nil {
+		return []outreach.Program{}, nil
+	}
+	programs, err := s.catalog.Programs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list programs: %w", err)
+	}
+	return programs, nil
+}
+
+// FocusGroups lists the fields of work the scoring understands.
+func (s *Service) FocusGroups() []outreach.FocusGroup { return s.prospects.FocusGroups() }
+
 // Input selects the shortlist.
 type Input struct {
+	// Program describes the program inline. Give this or ProgramID.
 	Program outreach.Program
+	// ProgramID names a program of the catalog.
+	ProgramID string
 	// Limit is the number of companies; 0 takes the default.
 	Limit int
 	// Emails asks for a draft email per company. Without it the shortlist
@@ -106,9 +150,9 @@ type Input struct {
 // Run builds the shortlist.
 func (s *Service) Run(ctx context.Context, in Input) (outreach.Shortlist, error) {
 	start := s.cfg.Now()
-	program := in.Program.Clean()
-	if err := program.Validate(); err != nil {
-		return outreach.Shortlist{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	program, err := s.resolveProgram(ctx, in)
+	if err != nil {
+		return outreach.Shortlist{}, err
 	}
 	limit := in.Limit
 	switch {
@@ -122,11 +166,12 @@ func (s *Service) Run(ctx context.Context, in Input) (outreach.Shortlist, error)
 	if err != nil {
 		return outreach.Shortlist{}, fmt.Errorf("find prospects: %w", err)
 	}
+	warnings := outreach.Warnings(found.Terms, s.prospects.FocusGroups())
 	if len(found.Candidates) == 0 {
-		return outreach.Shortlist{}, ErrNoProspects
+		return outreach.Shortlist{}, &NoProspectsError{Warnings: warnings}
 	}
 
-	list := outreach.Shortlist{Program: program, GeneratedAt: start}
+	list := outreach.Shortlist{Program: program, GeneratedAt: start, Terms: found.Terms, Warnings: warnings}
 	for _, c := range found.Candidates {
 		list.Entries = append(list.Entries, outreach.Entry{Candidate: c, Notes: candidateNotes(c)})
 	}
@@ -166,6 +211,31 @@ func (s *Service) Run(ctx context.Context, in Input) (outreach.Shortlist, error)
 		"output_tokens", list.Trace.OutputTokens,
 		"duration_ms", list.Trace.DurationMS)
 	return list, nil
+}
+
+// resolveProgram returns the program to shortlist for, from the catalog or
+// from the request, validated.
+func (s *Service) resolveProgram(ctx context.Context, in Input) (outreach.Program, error) {
+	inline := in.Program.Name != "" || len(in.Program.FocusAreas) > 0 || in.Program.Description != "" ||
+		len(in.Program.Regions) > 0 || len(in.Program.ProgramTypes) > 0
+	switch {
+	case in.ProgramID != "" && inline:
+		return outreach.Program{}, fmt.Errorf("%w: give either a program_id or the program itself, not both", ErrInvalidInput)
+	case in.ProgramID != "":
+		if s.catalog == nil {
+			return outreach.Program{}, fmt.Errorf("%w: no program catalog is configured; describe the program in the request", ErrInvalidInput)
+		}
+		p, err := s.catalog.Program(ctx, strings.TrimSpace(in.ProgramID))
+		if err != nil {
+			return outreach.Program{}, fmt.Errorf("program %q: %w", in.ProgramID, err)
+		}
+		return p, nil
+	}
+	program := in.Program.Clean()
+	if err := program.Validate(); err != nil {
+		return outreach.Program{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	return program, nil
 }
 
 // draftEmails drafts one email per entry, a few at a time. A company whose

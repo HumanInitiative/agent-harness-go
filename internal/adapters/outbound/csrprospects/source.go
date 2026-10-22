@@ -46,6 +46,11 @@ func (s *Source) Prospects(ctx context.Context, p outreach.Program, limit int) (
 		return outbound.Prospects{}, fmt.Errorf("csrprospects: %w", err)
 	}
 	var out outbound.Prospects
+	for _, tc := range index.Profile().Coverage(found) {
+		out.Terms = append(out.Terms, outreach.TermCoverage{
+			Kind: tc.Kind, Term: tc.Term, Group: tc.Group, Recognized: tc.Recognized, Companies: tc.Companies,
+		})
+	}
 	for _, f := range found {
 		if !f.Match.FocusMatch {
 			continue
@@ -56,6 +61,16 @@ func (s *Source) Prospects(ctx context.Context, p outreach.Program, limit int) (
 		}
 	}
 	return out, nil
+}
+
+// FocusGroups implements outbound.ProspectSource.
+func (s *Source) FocusGroups() []outreach.FocusGroup {
+	groups := csr.FocusGroups()
+	out := make([]outreach.FocusGroup, len(groups))
+	for i, g := range groups {
+		out[i] = outreach.FocusGroup{Name: g.Name, Synonyms: g.Synonyms}
+	}
+	return out
 }
 
 func candidate(f csr.Prospect) outreach.Candidate {

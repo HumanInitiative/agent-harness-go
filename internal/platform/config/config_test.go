@@ -362,3 +362,20 @@ func TestLoad_Outreach(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_OutreachProgramsFile(t *testing.T) {
+	on := merge(merge(requiredOnly(), "OUTREACH_ENABLED", "true"), "CSR_TOOLS_ENABLED", "true")
+	cfg, err := config.LoadFrom(env(merge(on, "OUTREACH_PROGRAMS_FILE", "config/hi-programs.yaml")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Outreach.ProgramsFile != "config/hi-programs.yaml" {
+		t.Errorf("ProgramsFile = %q", cfg.Outreach.ProgramsFile)
+	}
+	if cfg, err := config.LoadFrom(env(on)); err != nil || cfg.Outreach.ProgramsFile != "" {
+		t.Errorf("no catalog by default: %+v %v", cfg.Outreach, err)
+	}
+	if _, err := config.LoadFrom(env(merge(requiredOnly(), "OUTREACH_PROGRAMS_FILE", "x.yaml"))); err == nil || !strings.Contains(err.Error(), "OUTREACH_PROGRAMS_FILE") {
+		t.Errorf("a catalog file without the feature on must fail, got %v", err)
+	}
+}
